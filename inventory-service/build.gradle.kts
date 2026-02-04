@@ -29,5 +29,4 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:kafka")
     testImplementation("org.testcontainers:postgresql")
-    runtimeOnly("org.postgresql:postgresql")
 }

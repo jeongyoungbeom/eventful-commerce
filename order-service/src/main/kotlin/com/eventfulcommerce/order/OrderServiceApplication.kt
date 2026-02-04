@@ -1,11 +1,11 @@
-package com.eventfulcommerce.notificationservice
+package com.eventfulcommerce.order
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 
 @SpringBootApplication
-class NotificationServiceApplication
+class OrderServiceApplication
 
 fun main(args: Array<String>) {
-    runApplication<NotificationServiceApplication>(*args)
+    runApplication<OrderServiceApplication>(*args)
 }
