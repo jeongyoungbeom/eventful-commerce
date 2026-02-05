@@ -7,10 +7,10 @@ data class OrdersRequest(
     val userId: String,
     val totalAmount: Long
 ) {
-    fun toEntity(ordersRequest: OrdersRequest): Orders {
+    fun toEntity(): Orders {
         return Orders(
-            userId = UUID.fromString(ordersRequest.userId),
-            totalAmount = ordersRequest.totalAmount,
+            userId = UUID.fromString(userId),
+            totalAmount = totalAmount,
             status = OrdersStatus.ORDER_CREATED,
         )
     }

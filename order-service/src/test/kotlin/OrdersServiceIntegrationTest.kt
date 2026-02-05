@@ -3,7 +3,7 @@ import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.domain.entity.Orders
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.service.OrdersService
-import com.eventfulcommerce.order.service.OutboxEventService
+import com.eventfulcommerce.common.OutboxEventService
 import org.assertj.core.api.Assertions.assertThat
 import org.mockito.Mockito.mock
 import org.mockito.kotlin.any

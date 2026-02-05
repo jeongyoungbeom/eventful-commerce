@@ -1,7 +1,7 @@
-package com.eventfulcommerce.order.domain
+package com.eventfulcommerce.common
 
 import java.time.Instant
-import java.util.*
+import java.util.UUID
 
 data class OrderCreatedPayload(
     val orderId: UUID,
