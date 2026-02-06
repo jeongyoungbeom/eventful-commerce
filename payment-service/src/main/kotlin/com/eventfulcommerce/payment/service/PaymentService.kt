@@ -7,9 +7,9 @@ import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.common.repository.OutboxEventRepository
 import com.eventfulcommerce.payment.domain.PaymentStatus
 import com.eventfulcommerce.payment.domain.entity.Payment
-import com.eventfulcommerce.payment.domain.entity.ProcessedEvent
+import com.eventfulcommerce.common.ProcessedEvent
 import com.eventfulcommerce.payment.repository.PaymentRepository
-import com.eventfulcommerce.payment.repository.ProcessedEventRepository
+import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -34,7 +34,7 @@ class PaymentService(
         val payload = objectMapper.readValue(readValue.payload, OrderCreatedPayload::class.java)
 
         val payment = Payment(
-            orderId = eventId,
+            orderId = payload.orderId,
             status = PaymentStatus.ACCEPTED,
             amount = payload.totalAmount
         )

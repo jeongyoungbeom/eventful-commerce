@@ -1,12 +1,29 @@
 server:
-  port: 8084
+  port: 8083
 
 spring:
   application:
-    name: shipping-service
+    name: shipping_service
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shipping_service
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: shipping-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+outbox:
+  topic: shipping-events
+  polling-ms: 200
