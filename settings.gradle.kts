@@ -1,10 +1,11 @@
 rootProject.name = "eventful-commerce"
 
 include(
-    "common",
+    "common-outbox",
+    "common-idempotency",
     "order-service",
     "payment-service",
-    "inventory-service",
+//    "inventory-service",
     "shipping-service",
     "notification-service",
 //    "integration-tests",

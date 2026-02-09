@@ -27,3 +27,8 @@ spring:
 outbox:
   topic: shipping-events
   polling-ms: 200
+
+#logging:
+#  level:
+#    org.hibernate.SQL: debug
+#    org.hibernate.orm.jdbc.bind: trace   # 파라미터 바인딩 로그(너무 시끄러우면 info로)
