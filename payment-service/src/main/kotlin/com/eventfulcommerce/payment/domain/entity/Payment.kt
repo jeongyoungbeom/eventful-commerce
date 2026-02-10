@@ -13,7 +13,7 @@ class Payment(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    val status: PaymentStatus,
+    var status: PaymentStatus,
 
     @Column(nullable = false)
     val amount: Long,

@@ -3,6 +3,7 @@ package com.eventfulcommerce.order.domain.entity
 import com.eventfulcommerce.common.BaseTimeEntity
 import com.eventfulcommerce.order.domain.OrdersStatus
 import jakarta.persistence.*
+import java.time.Instant
 import java.util.*
 
 @Entity
@@ -16,7 +17,14 @@ class Orders(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    val status: OrdersStatus,
+    var status: OrdersStatus,
+
+    var reservationId: UUID? = null,
+    var expiresAt: Instant? = null,
+
+    @Version
+    var version: Long = 0L
+
 ) : BaseTimeEntity() {
 
     @Id

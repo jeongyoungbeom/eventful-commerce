@@ -17,4 +17,6 @@ dependencies {
     compileOnly("org.springframework.data:spring-data-commons")
     compileOnly("org.springframework.data:spring-data-jpa")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
 }

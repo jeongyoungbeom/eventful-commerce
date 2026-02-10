@@ -2,6 +2,7 @@ package com.eventfulcommerce.common
 
 import com.eventfulcommerce.common.repository.OutboxEventRepository
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.PageRequest
 import org.springframework.kafka.core.KafkaTemplate
@@ -9,6 +10,8 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.util.concurrent.atomic.AtomicInteger
+
+private val logger = KotlinLogging.logger { }
 
 @Component
 class OutboxPublisher(
@@ -47,7 +50,7 @@ class OutboxPublisher(
                 occurredAt = event.createdAt,
                 payload = event.payload
             )
-
+            logger.info { "퍼블리싱 -> " + event.payload}
             val valueAsString = objectMapper.writeValueAsString(outboxEventMessage)
 
             kafkaTemplate.send(topic, event.aggregateId.toString(), valueAsString)

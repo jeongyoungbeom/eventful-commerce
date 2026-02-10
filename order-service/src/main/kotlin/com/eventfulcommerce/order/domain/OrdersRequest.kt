@@ -11,7 +11,7 @@ data class OrdersRequest(
         return Orders(
             userId = UUID.fromString(userId),
             totalAmount = totalAmount,
-            status = OrdersStatus.ORDER_CREATED,
+            status = OrdersStatus.ORDER_RESERVED,
         )
     }
 }

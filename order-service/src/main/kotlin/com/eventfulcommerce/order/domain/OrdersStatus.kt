@@ -1,7 +1,9 @@
 package com.eventfulcommerce.order.domain
 
 enum class OrdersStatus {
-    ORDER_CREATED,
-    ORDER_PROGRESSING,
-    ORDER_COMPLETED
+    ORDER,
+    ORDER_RESERVED,
+    ORDER_CONFIRMED,
+    ORDER_EXPIRED,
+    ORDER_CANCELED
 }

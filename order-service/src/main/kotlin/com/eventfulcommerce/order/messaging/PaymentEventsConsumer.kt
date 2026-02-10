@@ -1,23 +1,20 @@
-package com.eventfulcommerce.payment.messaging
+package com.eventfulcommerce.order.messaging
 
 import com.eventfulcommerce.common.OutboxEventMessage
-import com.eventfulcommerce.payment.service.PaymentService
+import com.eventfulcommerce.order.service.OrdersService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
 
 @Component
-class OrderEventsConsumer(
+class PaymentEventsConsumer(
     private val objectMapper: ObjectMapper,
-    private val paymentService: PaymentService
+    private val ordersService: OrdersService
 ) {
-
-    @KafkaListener(topics = ["order-events"], groupId = "payment-service")
+    @KafkaListener(topics = ["payment-events"], groupId = "order-service")
     fun receive(value: String) {
         val readValue = objectMapper.readValue(value, OutboxEventMessage::class.java)
-
-        if (readValue.eventType != "ORDER_RESERVED") return
-
-        paymentService.handleOrderCreated(readValue)
+        if (readValue.eventType != "PAYMENT_COMPLETED") return
+        ordersService.handlePaymentCompleted(readValue)
     }
 }

@@ -1,5 +1,8 @@
 package com.eventfulcommerce.shipping.domain
 
 enum class ShippingStatus {
-    READY, SHIPPED, DELIVERED
+    SHIPPING,
+    SHIPPING_READY,
+    SHIPPING_SHIPPED,
+    SHIPPING_DELIVERED
 }

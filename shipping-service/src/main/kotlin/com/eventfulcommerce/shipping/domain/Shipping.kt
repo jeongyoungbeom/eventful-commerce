@@ -12,7 +12,7 @@ class Shipping(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    val status: ShippingStatus = ShippingStatus.READY,
+    var status: ShippingStatus = ShippingStatus.SHIPPING_READY,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now()

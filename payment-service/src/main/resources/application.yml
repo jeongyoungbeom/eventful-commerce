@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: payment_service
+    name: payment-service
 
   datasource:
     url: jdbc:postgresql://localhost:5432/payment_service
