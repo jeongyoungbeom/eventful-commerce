@@ -11,6 +11,9 @@ class Payment(
     @Column(name = "order_id", nullable = false)
     val orderId: UUID,
 
+    @Column(nullable = true)
+    var reservationId: UUID? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     var status: PaymentStatus,

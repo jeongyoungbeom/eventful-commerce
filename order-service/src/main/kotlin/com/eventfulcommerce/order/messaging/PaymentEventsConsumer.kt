@@ -14,7 +14,10 @@ class PaymentEventsConsumer(
     @KafkaListener(topics = ["payment-events"], groupId = "order-service")
     fun receive(value: String) {
         val readValue = objectMapper.readValue(value, OutboxEventMessage::class.java)
-        if (readValue.eventType != "PAYMENT_COMPLETED") return
-        ordersService.handlePaymentCompleted(readValue)
+        if (readValue.eventType == "PAYMENT_COMPLETED") {
+            ordersService.handlePaymentCompleted(readValue)
+        } else if (readValue.eventType == "PAYMENT_FAILED") {
+            ordersService.handlePaymentFailed(readValue)
+        }
     }
 }

@@ -9,6 +9,7 @@ import com.eventfulcommerce.common.PaymentCompletedPayload
 import com.eventfulcommerce.common.ProcessedEvent
 import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import com.eventfulcommerce.common.OrderConfirmedPayload
+import com.eventfulcommerce.common.PaymentFailedPayload
 import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.repository.OrdersRepository
@@ -17,6 +18,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.util.UUID
 import kotlin.collections.map
 import kotlin.math.log
 
@@ -33,7 +35,7 @@ class OrdersService(
     private val ttlSeconds = 10 * 60L
 
     @Transactional
-    fun orders(ordersRequests: List<OrdersRequest>): String {
+    fun orders(ordersRequests: List<OrdersRequest>): List<String> {
         val orderList = ordersRequests.map { it.toEntity() }
         val saveOrders = ordersRepository.saveAll(orderList)
 
@@ -77,7 +79,7 @@ class OrdersService(
         inventoryReservationService.getStockSummary()
         outboxEventService.recode(events)
 
-        return "success"
+        return saveOrders.map { it.id.toString() }
     }
 
     fun handlePaymentCompleted(value: OutboxEventMessage) {
@@ -115,5 +117,25 @@ class OrdersService(
         )
         logger.info { "재고 처리 후 -> 배송으로 전송" }
         outboxEventService.recode(listOf(outboxEvent))
+    }
+
+    fun handlePaymentFailed(value: OutboxEventMessage) {
+        val eventId = value.eventId
+        try {
+            processedEventRepository.save(ProcessedEvent(eventId))
+        } catch (e: Exception) {
+            return
+       }
+
+        val readValue = objectMapper.readValue(value.payload, PaymentFailedPayload::class.java)
+        val order = ordersRepository.findById(readValue.orderId).orElseThrow()
+
+        if (order.status != OrdersStatus.ORDER_RESERVED) return
+
+        val reservationId = order.reservationId ?: return
+        inventoryReservationService.release(reservationId)
+
+        order.status = OrdersStatus.ORDER_CANCELED
+        ordersRepository.save(order)
     }
 }

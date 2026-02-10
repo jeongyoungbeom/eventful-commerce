@@ -23,8 +23,7 @@ private val logger = KotlinLogging.logger { }
 class PaymentService(
     private val objectMapper: ObjectMapper,
     private val processedEventRepository: ProcessedEventRepository,
-    private val paymentRepository: PaymentRepository,
-    private val outboxEventRepository: OutboxEventRepository
+    private val paymentRepository: PaymentRepository
 ) {
     @Transactional
     fun handleOrderCreated(readValue: OutboxEventMessage) {
@@ -41,31 +40,11 @@ class PaymentService(
         val payment = Payment(
             orderId = payload.orderId,
             status = PaymentStatus.PAYMENT_RESERVED,
-            amount = payload.totalAmount
+            amount = payload.totalAmount,
+            reservationId = payload.reservationId,
         )
 
         logger.info { "결제 진행" }
         paymentRepository.save(payment)
-        Thread.sleep(3000L)
-        val paymentPayload = PaymentCompletedPayload(
-            paymentId = payment.id,
-            orderId = payment.orderId,
-            amount = payment.amount,
-            reservationId = payload.reservationId,
-            completedAt = Instant.now()
-        )
-        val outboxEventPayload = objectMapper.writeValueAsString(paymentPayload)
-
-        logger.info { "결제 완료" }
-        outboxEventRepository.save(
-            OutboxEvent(
-                aggregateType = PaymentStatus.PAYMENT.toString(),
-                aggregateId = payment.id,
-                eventType = PaymentStatus.PAYMENT_COMPLETED.toString(),
-                payload = outboxEventPayload,
-                status = OutboxStatus.PENDING,
-            )
-        )
-        payment.status = PaymentStatus.PAYMENT_COMPLETED
     }
 }
