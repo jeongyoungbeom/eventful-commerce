@@ -1,4 +1,4 @@
-package com.eventfulcommerce.shipping.messaging
+package com.eventfulcommerce.shipping.message
 
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.shipping.service.ShippingService

@@ -19,15 +19,17 @@ subprojects {
     group = "com.yourapp"
     version = "0.0.1"
 
-
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        compilerOptions {
-            freeCompilerArgs.add("-Xjsr305=strict")
+    // afterEvaluate로 감싸서 Configuration Phase 문제 해결
+    afterEvaluate {
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            compilerOptions {
+                freeCompilerArgs.add("-Xjsr305=strict")
+            }
         }
-    }
 
-    tasks.withType<Test> {
-        useJUnitPlatform()
+        tasks.withType<Test>().configureEach {
+            useJUnitPlatform()
+        }
     }
 
     dependencies {

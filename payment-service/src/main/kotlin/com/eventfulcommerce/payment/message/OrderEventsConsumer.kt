@@ -1,4 +1,4 @@
-package com.eventfulcommerce.payment.messaging
+package com.eventfulcommerce.payment.message
 
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.payment.service.PaymentService

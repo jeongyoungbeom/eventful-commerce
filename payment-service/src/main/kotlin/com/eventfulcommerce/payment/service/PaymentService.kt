@@ -1,5 +1,6 @@
 package com.eventfulcommerce.payment.service
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OrderReservedPayload
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventMessage
@@ -22,29 +23,24 @@ private val logger = KotlinLogging.logger { }
 @Service
 class PaymentService(
     private val objectMapper: ObjectMapper,
-    private val processedEventRepository: ProcessedEventRepository,
+    private val idempotencyHandler: IdempotencyHandler,
     private val paymentRepository: PaymentRepository
 ) {
     @Transactional
-    fun handleOrderCreated(readValue: OutboxEventMessage) {
-        val eventId = readValue.eventId
-        try {
-            processedEventRepository.save(ProcessedEvent(eventId))
-        } catch (e: Exception) {
-            // 로그 남길 것
-            return
+    fun handleOrderCreated(message: OutboxEventMessage) {
+        idempotencyHandler.executeIdempotent(message.eventId) {
+            logger.info { "주문 생성 이벤트 수신: eventId=${message.eventId}" }
+            val payload = objectMapper.readValue(message.payload, OrderReservedPayload::class.java)
+
+            val payment = Payment(
+                orderId = payload.orderId,
+                status = PaymentStatus.PAYMENT_RESERVED,
+                amount = payload.totalAmount,
+                reservationId = payload.reservationId,
+            )
+
+            logger.info { "결제 생성: orderId=${payload.orderId}, amount=${payload.totalAmount}" }
+            paymentRepository.save(payment)
         }
-        println("PAYLOAD_JSON = $readValue")
-        val payload = objectMapper.readValue(readValue.payload, OrderReservedPayload::class.java)
-
-        val payment = Payment(
-            orderId = payload.orderId,
-            status = PaymentStatus.PAYMENT_RESERVED,
-            amount = payload.totalAmount,
-            reservationId = payload.reservationId,
-        )
-
-        logger.info { "결제 진행" }
-        paymentRepository.save(payment)
     }
 }

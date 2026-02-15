@@ -1,4 +1,4 @@
-package com.eventfulcommerce.order.messaging
+package com.eventfulcommerce.order.message
 
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.order.service.OrdersService
