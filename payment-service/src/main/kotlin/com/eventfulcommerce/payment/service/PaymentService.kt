@@ -4,11 +4,6 @@ import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OrderReservedPayload
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventMessage
-import com.eventfulcommerce.common.OutboxStatus
-import com.eventfulcommerce.common.PaymentCompletedPayload
-import com.eventfulcommerce.common.ProcessedEvent
-import com.eventfulcommerce.common.repository.OutboxEventRepository
-import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import com.eventfulcommerce.payment.domain.PaymentStatus
 import com.eventfulcommerce.payment.domain.entity.Payment
 import com.eventfulcommerce.payment.repository.PaymentRepository

@@ -1,6 +1,48 @@
+version: "3.8"
+
 services:
+  # PostgreSQL - 모든 서비스가 사용하는 메인 DB
+  postgres:
+    image: postgres:16-alpine
+    container_name: eventful-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eventful-network
+
+  # Redis - 재고 관리용
+  redis:
+    image: redis:7-alpine
+    container_name: eventful-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eventful-network
+
+  # Kafka
   kafka:
     image: apache/kafka:3.7.0
+    container_name: eventful-kafka
     ports:
       - "9092:9092"
     environment:
@@ -18,3 +60,18 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - eventful-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  eventful-network:
+    driver: bridge

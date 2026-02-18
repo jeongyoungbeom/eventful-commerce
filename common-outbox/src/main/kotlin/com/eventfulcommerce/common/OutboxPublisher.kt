@@ -56,8 +56,8 @@ class OutboxPublisher(
             kafkaTemplate.send(topic, event.aggregateId.toString(), valueAsString)
                 .whenComplete { _, ex ->
                     try {
-                        if (ex == null) outboxEventService.sent(event.id)
-                        else outboxEventService.failed(event.id, ex, maxRetries)
+                        if (ex == null) outboxEventService.markAsSent(event.id)
+                        else outboxEventService.markAsFailed(event.id, ex, maxRetries)
                     } finally {
                         inFlight.decrementAndGet()
                     }

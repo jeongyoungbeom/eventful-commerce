@@ -26,7 +26,7 @@ class PaymentWebhookService(
     @Transactional
     fun handle(request: PaymentWebhookRequest) {
         val payment = (paymentRepository.findByOrderId(request.orderId)
-            ?: throw IllegalArgumentException("payment not found: orderId= ${request.orderId}"))
+            ?: throw IllegalArgumentException("결제 정보를 찾을 수 없습니다: orderId= ${request.orderId}"))
 
         if (payment.status == PaymentStatus.PAYMENT_COMPLETED || payment.status == PaymentStatus.PAYMENT_FAILED) return
 
@@ -76,6 +76,7 @@ class PaymentWebhookService(
             pgTxId = request.pgTxId!!
         )
 
+        logger.info { "결제 실패" }
         outboxEventRepository.save(
             OutboxEvent(
                 aggregateType = PaymentStatus.PAYMENT.toString(),

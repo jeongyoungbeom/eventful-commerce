@@ -1,0 +1,16 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop  # 테스트 시작 시 테이블 생성, 종료 시 삭제
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+  kafka:
+    bootstrap-servers: localhost:9999  # 테스트에서는 Kafka 사용 안 함
+    
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.testcontainers: info
