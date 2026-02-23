@@ -1,17 +1,25 @@
+# Eventful Commerce
 
-# 🛒 Eventful Commerce
+> 이벤트 기반 분산 커머스 백엔드 - 정합성·동시성·신뢰성 중심 설계
 
-> 이벤트 기반 마이크로서비스 아키텍처로 구현한 분산 커머스 플랫폼
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF?logo=kotlin)](https://kotlinlang.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.5-6DB33F?logo=spring)](https://spring.io/projects/spring-boot)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-7.0-DC382D?logo=redis)](https://redis.io/)
+[![Kafka](https://img.shields.io/badge/Kafka-3.7-231F20?logo=apache-kafka)](https://kafka.apache.org/)
+
+---
+
 ## 프로젝트 개요
 
-**Eventful Commerce**는 분산 환경에서 데이터 정합성을 보장하는 이커머스 백엔드 시스템입니다.
+분산 환경에서 발생하는 **재고 동시성**, **이벤트 신뢰성(double write)**, **중복 이벤트(at-least-once)** 문제를 주문-결제-배송 플로우에 적용해 **Outbox·Idempotency·Redis Lua 원자 처리**로 실패/중복/경합 상황에서도 상태가 수렴하도록 구현했습니다.
 
 ### 핵심 목표
 
-- **분산 트랜잭션 관리**: Saga 패턴으로 4개 서비스 간 트랜잭션 조율
-- **데이터 정합성 보장**: Outbox 패턴으로 이벤트 발행 100% 보장
-- **동시성 제어**: Redis Lua 스크립트 + JPA 낙관적 락으로 재고 충돌 방지
-- **멱등성 보장**: 중복 이벤트 처리 방지로 안정성 확보
+- **분산 정합성**: 결제 실패 시 주문 취소 + 재고 해제로 상태 수렴
+- **이벤트 신뢰성**: Outbox 패턴으로 DB 커밋과 이벤트 발행을 분리해 누락 방지
+- **동시성 제어**: Redis Lua 스크립트로 재고 레이스 컨디션 방지
+- **멱등성 보장**: 중복 이벤트 처리 방지 (at-least-once 환경)
 
 ---
 
@@ -20,46 +28,47 @@
 ### 시스템 구성도
 
 ```
-┌─────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│   Client    │─────>│Order Service │─────>│Payment Service─────>│Shipping Service
-│             │      │ (Port 8081)  │      │ (Port 8082)  │      │ (Port 8083)  │
-└─────────────┘      └──────┬───────┘      └──────┬───────┘      └──────┬───────┘
-                            │                     │                     │
-                            │                     │                     │
-                            v                     v                     v
-                     ┌──────────────────────────────────────────────────────┐
-                     │              Kafka (Event Broker)                    │
-                     │                 Topic: order-events                  │
-                     └──────────────────────────────────────────────────────┘
-                             
+┌─────────────┐      
+│   Client    │
+└──────┬──────┘
+       │ POST /orders
+       v
+┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+│Order Service │      │Payment Service     │Shipping Service
+│ (Port 8081)  │      │ (Port 8082)  │      │ (Port 8083)  │
+└──────┬───────┘      └──────┬───────┘      └──────┬───────┘
+       │                     │                     │
+       │ order-events        │ payment-events      │ shipping-events
+       v                     v                     v
+┌───────────────────────────────────────────────────────┐
+│           Kafka (Topic: 서비스별 분리)                 │
+└───────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Infrastructure Layer                                │
-├──────────────┬──────────────────┬──────────────────┬─────────────────────┬─┤
-│  PostgreSQL  │      Redis       │      Kafka       │   Docker Compose    │ │
-│  (Port 5432) │   (Port 6379)    │   (Port 9092)    │                     │ │
-└──────────────┴──────────────────┴──────────────────┴─────────────────────┴─┘
+Infrastructure Layer:
+├── PostgreSQL (Port 5432) - 각 서비스 DB
+├── Redis (Port 6379) - 재고 관리
+└── Kafka (Port 9092) - 이벤트 브로커
 ```
 
 ### 서비스별 책임
 
 | 서비스 | 포트 | 책임 | 주요 기능 |
 |--------|------|------|-----------|
-| **Order Service** | 8081 | 주문 관리 및 재고 예약 | • 주문 생성<br>• Redis 기반 재고 예약<br>• 주문 상태 관리 (낙관적 락) |
-| **Payment Service** | 8082 | 결제 처리 | • 결제 승인/실패<br>• 결제 이벤트 발행 |
-| **Shipping Service** | 8083 | 배송 처리 | • 배송 시작 |
+| **Order Service** | 8081 | 주문 관리 및 재고 예약 | • 주문 생성 (All or Nothing)<br>• Redis 기반 재고 예약/확정/해제<br>• 주문 상태 관리 (낙관적 락) |
+| **Payment Service** | 8082 | 결제 처리 | • 결제 승인/실패<br>• Webhook API 제공<br>• 결제 이벤트 발행 |
+| **Shipping Service** | 8083 | 배송 처리 | • 배송 생성<br>• 배송 이벤트 발행 |
 
 ---
 
 ## 핵심 구현 사항
 
-### 1. Saga 패턴 (Choreography)
+### 1. 이벤트 기반 분산 플로우 + 보상 로직
 
-분산 트랜잭션을 이벤트 기반으로 조율합니다.
+주문-결제-배송 흐름을 이벤트로 분리하고, 실패 시 **보상 로직**으로 상태 수렴
 
 ```
 [정상 플로우]
-주문 생성 → 재고 예약 → 결제 요청 → 결제 승인 → 배송 시작
+주문 생성 → 재고 예약 → 결제 요청 → 결제 승인 → 배송 준비
 
 [보상 트랜잭션]
 결제 실패 → 재고 해제 → 주문 취소
@@ -98,28 +107,33 @@ fun orders(requests: List<OrdersRequest>) {
 ```
 
 **보장하는 것:**
-- ✅ At-least-once 전달
+- ✅ DB 커밋된 이벤트의 최종 발행 가능성 (재시도)
 - ✅ 트랜잭션 일관성
-- ✅ 재시도 메커니즘
+- ✅ At-least-once 전달
 
-### 3. ⚡ 동시성 제어
+### 3. 동시성 제어
 
 #### Redis Lua 스크립트 (재고 관리)
 
 원자적 연산으로 재고 충돌을 방지합니다.
 
 ```lua
--- reserve.lua
+-- reserve.lua: 재고 예약
 local stock = tonumber(redis.call('GET', KEYS[1]) or 0)
 if stock > 0 then
-    redis.call('DECR', KEYS[1])
-    redis.call('SETEX', KEYS[2], ARGV[1], ARGV[2])  -- hold 키 생성
+    redis.call('DECR', KEYS[1])  -- 재고 감소
+    redis.call('SETEX', KEYS[2], ARGV[1], ARGV[2])  -- hold 키 생성 (TTL)
     redis.call('INCR', KEYS[3])  -- holdCount 증가
     return 1
 else
     return 0
 end
 ```
+
+**3가지 연산:**
+- `reserve`: 재고 감소 + reservation 키 생성 (TTL 10분)
+- `commit`: 결제 성공 시 확정
+- `release`: 결제 실패/만료 시 재고 복구
 
 #### JPA 낙관적 락 (주문 상태 관리)
 
@@ -137,7 +151,7 @@ class Orders(
 
 ### 4. 멱등성 보장
 
-중복 이벤트 처리를 방지합니다.
+중복 이벤트 처리를 방지합니다 (Kafka at-least-once 전제).
 
 ```kotlin
 @Component
@@ -150,7 +164,7 @@ class IdempotencyHandler(
             processedEventRepository.save(ProcessedEvent(eventId))
             IdempotencyResult.Success(action())
         } catch (e: DataIntegrityViolationException) {
-            IdempotencyResult.AlreadyProcessed
+            IdempotencyResult.AlreadyProcessed  // 이미 처리됨
         }
     }
 }
@@ -158,10 +172,10 @@ class IdempotencyHandler(
 
 ### 5. 주문 만료 처리
 
-TTL이 지난 예약 주문을 자동으로 취소합니다.
+TTL이 지난 예약 주문을 자동으로 취소하고 재고를 복구합니다.
 
 ```kotlin
-@Scheduled(fixedDelay = 10000)
+@Scheduled(fixedDelay = 10000)  // 10초마다 실행
 fun expireReservedOrders() {
     val expiredOrders = ordersRepository.findByStatusAndExpiresAtBefore(
         OrdersStatus.ORDER_RESERVED, 
@@ -169,7 +183,7 @@ fun expireReservedOrders() {
     )
     
     expiredOrders.forEach { order ->
-        orderExpirationService.expireOrder(order.id)  // 별도 트랜잭션
+        orderExpirationService.expireOrder(order.id)
     }
 }
 ```
@@ -182,54 +196,35 @@ fun expireReservedOrders() {
 - **Language**: Kotlin 1.9.24
 - **Framework**: Spring Boot 3.3.5
 - **ORM**: Spring Data JPA (Hibernate)
-- **Database**: PostgreSQL
-- **Cache**: Redis
-- **Message Queue**: Apache Kafka
-- **Build Tool**: Gradle
+- **Database**: PostgreSQL 16
+- **Cache**: Redis 7.0
+- **Message Queue**: Apache Kafka 3.7.0
+- **Build Tool**: Gradle 8.x
 
 ### Infrastructure
 - **Container**: Docker, Docker Compose
 - **Logging**: Kotlin Logging
 
-### Libraries
-- **Jackson**: JSON 직렬화
-- **Lettuce**: Redis 클라이언트
-- **Kafka Client**: Spring Kafka
-
 ---
 
-## 실행 방법
+## Quick Start
 
 ### 사전 요구사항
 
-- JDK 21+
+- JDK 17+
 - Docker & Docker Compose
-- Gradle (또는 ./gradlew 사용)
 
 ### 1. 인프라 실행
 
 ```bash
 # PostgreSQL, Redis, Kafka 실행
-cd infra
 docker-compose up -d
 
 # 확인
-docker-compose ps
+docker ps
 ```
 
-### 2. 데이터베이스 초기화
-
-```bash
-# 각 서비스별 DB 생성
-docker exec -it infra-postgres-1 psql -U eventful -d eventful
-
-CREATE DATABASE order_service;
-CREATE DATABASE payment_service;
-CREATE DATABASE shipping_service;
-CREATE DATABASE notification_service;
-```
-
-### 3. 서비스 실행
+### 2. 서비스 실행
 
 ```bash
 # 전체 빌드
@@ -239,12 +234,12 @@ CREATE DATABASE notification_service;
 ./gradlew :order-service:bootRun
 ./gradlew :payment-service:bootRun
 ./gradlew :shipping-service:bootRun
-./gradlew :notification-service:bootRun
 ```
 
-### 4. 주문 생성 테스트
+### 3. 주문 생성 테스트
 
 ```bash
+# 주문 생성
 curl -X POST http://localhost:8081/orders \
   -H "Content-Type: application/json" \
   -d '[
@@ -253,11 +248,34 @@ curl -X POST http://localhost:8081/orders \
       "totalAmount": 10000
     }
   ]'
+
+# 성공 시 응답: ["<order-uuid>"]
+```
+
+### 4. 결제 처리 (Webhook)
+
+```bash
+# 결제 성공
+curl -X POST http://localhost:8082/payments/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId": "<order-uuid>",
+    "result": "SUCCESS",
+    "pgTxId": "PG-TX-123"
+  }'
+
+# 결제 실패
+curl -X POST http://localhost:8082/payments/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId": "<order-uuid>",
+    "result": "FAILURE"
+  }'
 ```
 
 ---
 
-## 📊 API 문서
+## API 문서
 
 ### Order Service (Port 8081)
 
@@ -273,25 +291,47 @@ curl -X POST http://localhost:8081/orders \
 ]
 ```
 
-**Response (성공):**
+**Response 200 OK (전체 성공):**
 ```json
-  ["uuid-1", "uuid-2"]
+["uuid-1", "uuid-2"]
 ```
 
-**Response (부분 실패 - 재고 부족):**
+**Response 409 CONFLICT (재고 부족):**
 ```json
-  ["uuid-1"]
+{
+  "code": "INSUFFICIENT_INVENTORY",
+  "message": "재고 부족으로 전체 주문이 취소되었습니다. 실패 주문: uuid-1",
+  "details": "uuid-1",
+  "timestamp": "2024-01-01T00:00:00Z"
+}
 ```
+
+> **All or Nothing 정책**: 여러 주문 중 하나라도 실패하면 전체 실패 (부분 성공 없음)
+
+---
 
 ### Payment Service (Port 8082)
 
-이벤트 기반으로 동작하며 직접 API 호출 불필요
+#### POST /payments/webhook - 결제 결과 수신
+
+**Request:**
+```json
+{
+  "orderId": "uuid",
+  "result": "SUCCESS",  // or "FAILURE"
+  "pgTxId": "PG-TX-123",
+  "amount": 10000
+}
+```
+
+**Response:**
+```json
+"Payment successful"
+```
+
+---
 
 ### Shipping Service (Port 8083)
-
-이벤트 기반으로 동작하며 직접 API 호출 불필요
-
-### Notification Service (Port 8084)
 
 이벤트 기반으로 동작하며 직접 API 호출 불필요
 
@@ -308,7 +348,8 @@ eventful-commerce/
 │   │   ├── domain/            # 엔티티, DTO
 │   │   ├── repository/        # DB 접근
 │   │   ├── scheduler/         # 주문 만료 스케줄러
-│   │   └── exception/         # 커스텀 예외
+│   │   ├── message/           # Kafka 컨슈머
+│   │   └── exception/         # 예외 처리
 │   └── src/main/resources/
 │       ├── lua/               # Redis Lua 스크립트
 │       └── application.yml
@@ -316,45 +357,219 @@ eventful-commerce/
 ├── shipping-service/           # 배송 서비스
 ├── common-outbox/              # Outbox 패턴 공통 모듈
 ├── common-idempotency/         # 멱등성 처리 공통 모듈
-└── infra/                      # Docker Compose 인프라
+├── docker-compose.yml          # 인프라 설정
+└── scripts/
+    └── init-databases.sql      # DB 초기화
 ```
+
+---
+
+## Troubleshooting
+
+### 1. Outbox 중복 발행과 컨슈머 멱등성의 갭
+
+**문제**: Outbox 재시도로 동일 이벤트가 2번 발행되었는데, 첫 번째 처리는 성공했지만 DB 커밋 전 장애로 `processed_event` 테이블에 기록 안 됨
+
+**시나리오**:
+```
+1. Outbox Publisher: 이벤트 A 발행 → Kafka 성공
+2. Consumer: 이벤트 A 수신 → 비즈니스 로직 실행 → DB 커밋 전 서버 다운
+3. Consumer 재시작 → processed_event에 A 없음
+4. Outbox Publisher: 이벤트 A 재발행 (SENT 아님)
+5. Consumer: 이벤트 A를 "새 이벤트"로 인식 → 중복 처리!
+```
+
+**원인**:
+- Outbox는 "발행 완료" 여부만 체크 (Kafka 응답)
+- Consumer는 "처리 완료" 여부를 DB 커밋으로 판단
+- 사이에 **장애 발생 시점의 갭** 존재
+
+**해결**:
+```kotlin
+@Transactional
+fun handlePaymentCompleted(eventMessage: OutboxEventMessage) {
+    // 1. 먼저 processed_event 저장 (멱등성 체크)
+    try {
+        processedEventRepository.save(ProcessedEvent(eventMessage.eventId))
+    } catch (e: DataIntegrityViolationException) {
+        logger.warn { "이미 처리된 이벤트: ${eventMessage.eventId}" }
+        return  // 중복이면 즉시 반환
+    }
+    
+    // 2. 비즈니스 로직 실행
+    val payload = objectMapper.readValue(eventMessage.payload, PaymentCompletedPayload::class.java)
+    val order = ordersRepository.findById(payload.orderId).orElseThrow()
+    
+    // ... 나머지 처리
+    
+    // 3. 모두 같은 트랜잭션에서 커밋
+}
+```
+
+**핵심**: 멱등성 체크를 비즈니스 로직 **앞**에 배치해 트랜잭션 경계 일치
+
+---
+
+### 2. Redis TTL 만료와 스케줄러 동시 처리 (낙관적 락 충돌)
+
+**문제**: 주문 만료 처리 중 결제 완료 이벤트가 동시에 도착해 충돌 발생
+
+**시나리오**:
+```
+1. 주문 A: expiresAt = 10:00:00, 현재 10:00:01
+2. Scheduler: 만료된 주문 A 발견 → 취소 처리 시작
+3. 동시에 Payment Complete 이벤트 도착 → 확정 처리 시작
+4. Scheduler: UPDATE orders SET status=CANCELED, version=version+1
+5. Payment Handler: UPDATE orders SET status=CONFIRMED, version=version+1
+6. → OptimisticLockException 발생!
+```
+
+**원인**:
+- TTL 만료와 결제 완료가 **거의 동시** 발생 가능
+- 두 트랜잭션이 동일 주문을 업데이트 시도
+- **낙관적 락 충돌**
+
+**해결**:
+```kotlin
+// OrderExpirationService
+@Transactional
+fun expireOrder(orderId: UUID) {
+    try {
+        val order = ordersRepository.findById(orderId).orElseThrow()
+        
+        // 이미 다른 상태면 스킵
+        if (order.status != OrdersStatus.ORDER_RESERVED) {
+            logger.info { "이미 처리됨: ${order.status}" }
+            return
+        }
+        
+        // reservation 확인 (이미 commit되었으면 스킵)
+        val reservationExists = redisTemplate.hasKey("hold:${order.reservationId}")
+        if (!reservationExists) {
+            logger.info { "이미 확정됨: ${order.reservationId}" }
+            return
+        }
+        
+        // 만료 처리
+        order.status = OrdersStatus.ORDER_EXPIRED
+        inventoryReservationService.release(order.reservationId!!)
+        ordersRepository.save(order)
+        
+    } catch (e: OptimisticLockException) {
+        // 다른 트랜잭션이 먼저 처리함 → 무시
+        logger.info { "이미 다른 트랜잭션이 처리: $orderId" }
+    }
+}
+```
+
+**핵심**:
+- 낙관적 락 예외를 "정상 케이스"로 처리
+- Redis reservation 존재 여부로 2차 검증
+
+---
+
+### 3. At-least-once로 인한 재고 중복 차감 시도
+
+**문제**: 동일한 `ORDER_RESERVED` 이벤트가 재처리되어 Payment가 2번 생성됨
+
+**시나리오**:
+```
+1. ORDER_RESERVED 이벤트 수신 → Payment 생성 (PENDING)
+2. Kafka 커밋 전 Consumer 재시작
+3. 동일 이벤트 재수신 → Payment 또 생성?
+```
+
+**원인**: Payment Service에 멱등성 미적용
+
+**해결**:
+```kotlin
+// PaymentService
+@Transactional
+fun handleOrderReserved(eventMessage: OutboxEventMessage) {
+    // 1. 멱등성 체크
+    idempotencyHandler.executeIdempotent(eventMessage.eventId) {
+        val payload = objectMapper.readValue(eventMessage.payload, OrderReservedPayload::class.java)
+        
+        // 2. 이미 Payment 존재하면 스킵
+        val existing = paymentRepository.findByOrderId(payload.orderId)
+        if (existing != null) {
+            logger.info { "이미 결제 존재: ${existing.id}" }
+            return@executeIdempotent
+        }
+        
+        // 3. Payment 생성
+        val payment = Payment(
+            orderId = payload.orderId,
+            amount = payload.totalAmount,
+            status = PaymentStatus.PENDING
+        )
+        paymentRepository.save(payment)
+    }
+}
+```
+
+**핵심**:
+- Idempotency Handler로 중복 실행 방지
+- 비즈니스 로직 내에도 중복 생성 체크
 
 ---
 
 ## 학습 내용
 
-### 1. 분산 트랜잭션의 어려움
+### 1. 분산 트랜잭션 관리
 
 **문제**: 여러 서비스에 걸친 트랜잭션을 어떻게 관리할 것인가?
 
 **해결**:
-- ✅ Saga 패턴 (Choreography) 적용
-- ✅ 보상 트랜잭션으로 롤백 처리
+- ✅ 이벤트 기반 플로우로 서비스 간 결합도 감소
+- ✅ 보상 트랜잭션으로 실패 시 상태 수렴
 - ✅ 최종 일관성 (Eventual Consistency) 수용
 
 ### 2. 이중 쓰기 문제
 
-**문제**: DB에 저장 성공 후 Kafka 발행 실패 시 데이터 불일치
+**문제**: DB 커밋 성공 후 Kafka 발행 실패 시 데이터 불일치
 
 **해결**:
-- ✅ Outbox 패턴 적용
-- ✅ DB 트랜잭션 안에서 이벤트 저장
-- ✅ 스케줄러가 주기적으로 폴링하여 발행
+- ✅ Outbox 패턴으로 DB 트랜잭션 내 이벤트 저장
+- ✅ 스케줄러가 폴링 후 발행 (재시도 가능)
+- ✅ 발행 실패에도 누락 없음
 
-### 3. 동시성 제어의 중요성
+### 3. 동시성 제어
 
-**문제**: 같은 재고에 대한 동시 주문 처리
+**문제**: 한정 재고에 동시 주문 시 레이스 컨디션
 
 **해결**:
 - ✅ Redis Lua 스크립트로 원자적 연산
-- ✅ JPA 낙관적 락으로 주문 상태 관리
-- ✅ 스케줄러와 이벤트 핸들러 간 충돌 방지
+- ✅ JPA 낙관적 락으로 주문 상태 경합 방지
+- ✅ 스케줄러와 이벤트 핸들러 간 충돌 감지
 
 ### 4. 멱등성의 필요성
 
-**문제**: 네트워크 오류로 같은 이벤트가 중복 발행될 수 있음
+**문제**: Kafka at-least-once로 중복 이벤트 발생
 
 **해결**:
-- ✅ ProcessedEvent 테이블로 이미 처리한 이벤트 추적
-- ✅ Unique Constraint로 중복 감지
-- ✅ 모든 이벤트 핸들러에 멱등성 적용
+- ✅ eventId 기반 중복 감지
+- ✅ Unique Constraint로 자동 차단
+- ✅ 모든 컨슈머에 멱등성 적용
+
+---
+
+## 테스트
+
+### 단위 테스트
+
+```bash
+./gradlew test
+```
+
+### 동시성 테스트
+
+```bash
+./gradlew :order-service:test --tests "SimpleConcurrencyTest"
+```
+
+### 성능 테스트 (K6)
+
+```bash
+k6 run loadtest.js
+```
