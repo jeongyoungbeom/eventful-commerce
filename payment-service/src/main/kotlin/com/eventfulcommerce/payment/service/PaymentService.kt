@@ -27,6 +27,13 @@ class PaymentService(
             logger.info { "주문 생성 이벤트 수신: eventId=${message.eventId}" }
             val payload = objectMapper.readValue(message.payload, OrderReservedPayload::class.java)
 
+            // 2. 이미 Payment 존재하면 스킵
+            val existing = paymentRepository.findByOrderId(payload.orderId)
+            if (existing != null) {
+                logger.info { "이미 결제 존재: ${existing.id}" }
+                return@executeIdempotent
+            }
+
             val payment = Payment(
                 orderId = payload.orderId,
                 status = PaymentStatus.PAYMENT_RESERVED,

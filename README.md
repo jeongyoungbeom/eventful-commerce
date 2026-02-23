@@ -386,24 +386,34 @@ eventful-commerce/
 
 **해결**:
 ```kotlin
-@Transactional
-fun handlePaymentCompleted(eventMessage: OutboxEventMessage) {
     // 1. 먼저 processed_event 저장 (멱등성 체크)
-    try {
-        processedEventRepository.save(ProcessedEvent(eventMessage.eventId))
+    return try {
+        // 멱등성 체크: 이미 처리된 이벤트인지 확인
+        processedEventRepository.save(ProcessedEvent(eventId))
+
+        // 처음 처리하는 이벤트이므로 비즈니스 로직 실행
+        val result = action()
+        logger.debug("이벤트 처리 완료: eventId={}", eventId)
+        IdempotencyResult.Success(result)
+
     } catch (e: DataIntegrityViolationException) {
-        logger.warn { "이미 처리된 이벤트: ${eventMessage.eventId}" }
-        return  // 중복이면 즉시 반환
+        // 중복 키 제약 위반 = 이미 처리된 이벤트
+        logger.debug("이미 처리된 이벤트: eventId={}", eventId)
+        IdempotencyResult.AlreadyProcessed
+
+    } catch (e: Exception) {
+        // 기타 예외는 상위로 전파
+        logger.error("이벤트 처리 중 오류 발생: eventId={}", eventId, e)
+        throw e
     }
     
     // 2. 비즈니스 로직 실행
-    val payload = objectMapper.readValue(eventMessage.payload, PaymentCompletedPayload::class.java)
-    val order = ordersRepository.findById(payload.orderId).orElseThrow()
+    val result = action()
     
     // ... 나머지 처리
     
     // 3. 모두 같은 트랜잭션에서 커밋
-}
+
 ```
 
 **핵심**: 멱등성 체크를 비즈니스 로직 **앞**에 배치해 트랜잭션 경계 일치
@@ -434,31 +444,30 @@ fun handlePaymentCompleted(eventMessage: OutboxEventMessage) {
 // OrderExpirationService
 @Transactional
 fun expireOrder(orderId: UUID) {
-    try {
-        val order = ordersRepository.findById(orderId).orElseThrow()
-        
-        // 이미 다른 상태면 스킵
-        if (order.status != OrdersStatus.ORDER_RESERVED) {
-            logger.info { "이미 처리됨: ${order.status}" }
-            return
-        }
-        
-        // reservation 확인 (이미 commit되었으면 스킵)
-        val reservationExists = redisTemplate.hasKey("hold:${order.reservationId}")
-        if (!reservationExists) {
-            logger.info { "이미 확정됨: ${order.reservationId}" }
-            return
-        }
-        
-        // 만료 처리
-        order.status = OrdersStatus.ORDER_EXPIRED
-        inventoryReservationService.release(order.reservationId!!)
-        ordersRepository.save(order)
-        
-    } catch (e: OptimisticLockException) {
-        // 다른 트랜잭션이 먼저 처리함 → 무시
-        logger.info { "이미 다른 트랜잭션이 처리: $orderId" }
+    val order = ordersRepository.findById(orderId).orElse(null) ?: run {
+        logger.warn { "주문을 찾을 수 없음: orderId=$orderId" }
+        return
     }
+
+    // 낙관적 락을 활용한 동시성 제어
+    // 이미 다른 트랜잭션에서 상태가 변경되었다면 OptimisticLockException 발생
+    if (order.status != OrdersStatus.ORDER_RESERVED) {
+        logger.info { "이미 처리된 주문: orderId=$orderId, status=${order.status}" }
+        return
+    }
+
+    val reservationId = order.reservationId
+    if (reservationId != null) {
+        logger.info { "만료된 주문 재고 해제: orderId=$orderId, reservationId=$reservationId" }
+        inventoryReservationService.release(reservationId)
+    } else {
+        logger.warn { "예약 ID가 없는 만료 주문: orderId=$orderId" }
+    }
+
+    order.status = OrdersStatus.ORDER_EXPIRED
+    ordersRepository.save(order) // @Version으로 낙관적 락 체크
+
+    logger.info { "주문 만료 처리 완료: orderId=$orderId" }
 }
 ```
 
@@ -551,25 +560,3 @@ fun handleOrderReserved(eventMessage: OutboxEventMessage) {
 - ✅ eventId 기반 중복 감지
 - ✅ Unique Constraint로 자동 차단
 - ✅ 모든 컨슈머에 멱등성 적용
-
----
-
-## 테스트
-
-### 단위 테스트
-
-```bash
-./gradlew test
-```
-
-### 동시성 테스트
-
-```bash
-./gradlew :order-service:test --tests "SimpleConcurrencyTest"
-```
-
-### 성능 테스트 (K6)
-
-```bash
-k6 run loadtest.js
-```
