@@ -1,14 +1,32 @@
--- Create databases for each service
-CREATE DATABASE order_service;
-CREATE DATABASE payment_service;
-CREATE DATABASE shipping_service;
-CREATE DATABASE notification_service;
+-- Create databases for each service (only if they don't exist)
+-- PostgreSQL doesn't support CREATE DATABASE IF NOT EXISTS directly,
+-- so we use conditional execution with \gexec
 
--- Grant privileges
+SELECT 'CREATE DATABASE order_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'order_service')\gexec
+
+SELECT 'CREATE DATABASE payment_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'payment_service')\gexec
+
+SELECT 'CREATE DATABASE shipping_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'shipping_service')\gexec
+
+SELECT 'CREATE DATABASE notification_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'notification_service')\gexec
+
+-- Grant privileges (these are idempotent - safe to run multiple times)
+\c order_service
 GRANT ALL PRIVILEGES ON DATABASE order_service TO postgres;
-GRANT ALL PRIVILEGES ON DATABASE payment_service TO postgres;
-GRANT ALL PRIVILEGES ON DATABASE shipping_service TO postgres;
-GRANT ALL PRIVILEGES ON DATABASE notification_service TO postgres;
+GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
 
--- Initialize Redis stock (will be done via Redis CLI or application)
--- redis-cli SET stock:default 100
+\c payment_service
+GRANT ALL PRIVILEGES ON DATABASE payment_service TO postgres;
+GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
+
+\c shipping_service
+GRANT ALL PRIVILEGES ON DATABASE shipping_service TO postgres;
+GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
+
+\c notification_service
+GRANT ALL PRIVILEGES ON DATABASE notification_service TO postgres;
+GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;

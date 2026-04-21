@@ -15,10 +15,10 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate
-#    properties:
-#      hibernate:
-#        format_sql: true
+      ddl-auto: update  # 테이블 자동 생성/업데이트 (개발용)
+    properties:
+      hibernate:
+        format_sql: true
     open-in-view: false
 
   kafka:
@@ -27,21 +27,18 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
+  # 모든 노드를 적는 이유는 1개만 설정했을 때 해당 노드가 죽어있을 수 있음.
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
-      database: ${REDIS_DB:0}
-      timeout: 2s
-
-  redis:
-    lettuce:
-      pool:
-        max-active: 16
-        max-idle: 16
-        min-idle: 2
-        max-wait: 1s
+      cluster:
+        nodes:
+          - localhost:7001
+          - localhost:7002
+          - localhost:7003
+          - localhost:7004
+          - localhost:7005
+          - localhost:7006
+        max-redirects: 3 # MOVED 응답 시 최대 재시도 횟수
 
 #  flyway:
 #    enabled: true

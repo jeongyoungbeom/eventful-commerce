@@ -29,9 +29,13 @@ class InventoryReservationService(
         setScriptSource(ResourceScriptSource(ClassPathResource("lua/release.lua")))
     }
 
-    private fun stockKey() = "stock:default"
-    private fun holdCountKey() = "holdCount:default"
-    private fun holdKey(reservationId: UUID) = "hold:$reservationId"
+
+    /*
+        앞에 {inventory{ 붙이는 이유는 3개 키가 모두 같은 노드에 저장되도록 하기 위함.
+     */
+    private fun stockKey() = "{inventory}:stock:default"
+    private fun holdCountKey() = "{inventory}:holdCount:default"
+    private fun holdKey(reservationId: UUID) = "{inventory}:hold:$reservationId"
 
     fun reserve(orderId: UUID, ttlSeconds: Long): UUID? {
         val reservationId = UUID.randomUUID()

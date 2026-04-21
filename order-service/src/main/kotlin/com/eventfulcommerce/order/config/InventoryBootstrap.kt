@@ -12,7 +12,7 @@ class InventoryBootstrap {
     @Bean
     @Profile("dev")
     fun initStock(template: StringRedisTemplate) = ApplicationRunner {
-        val key = "stock:default"
+        val key = "{inventory}:stock:default"
         if (template.hasKey(key) != true) {
             template.opsForValue().set(key, "100")
         }

@@ -13,10 +13,10 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate
-#    properties:
-#      hibernate:
-#        format_sql: true
+      ddl-auto: update  # 테이블 자동 생성/업데이트 (개발용)
+    properties:
+      hibernate:
+        format_sql: true
     open-in-view: false
 
   kafka:
