@@ -32,12 +32,12 @@ spring:
     redis:
       cluster:
         nodes:
-          - localhost:7001
-          - localhost:7002
-          - localhost:7003
-          - localhost:7004
-          - localhost:7005
-          - localhost:7006
+          - redis-cluster.local:7001
+          - redis-cluster.local:7002
+          - redis-cluster.local:7003
+          - redis-cluster.local:7004
+          - redis-cluster.local:7005
+          - redis-cluster.local:7006
         max-redirects: 3 # MOVED 응답 시 최대 재시도 횟수
 
 #  flyway:

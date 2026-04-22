@@ -1,0 +1,30 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: shipping-service
+
+  # Docker 환경에서는 컨테이너 이름으로 접속
+  datasource:
+    url: jdbc:postgresql://postgres:5432/shipping_service
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+  kafka:
+    bootstrap-servers: kafka:9092
+    consumer:
+      group-id: shipping-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+outbox:
+  topic: shipping-events
+  polling-ms: 200

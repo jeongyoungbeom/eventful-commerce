@@ -1,0 +1,44 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: order-service
+
+  # Docker 환경에서는 컨테이너 이름으로 접속
+  datasource:
+    url: jdbc:postgresql://postgres:5432/order_service
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+  kafka:
+    bootstrap-servers: kafka:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+  # Redis Cluster - 컨테이너 이름 사용
+  data:
+    redis:
+      cluster:
+        nodes:
+          - redis-node-1:7001
+          - redis-node-2:7002
+          - redis-node-3:7003
+          - redis-node-4:7004
+          - redis-node-5:7005
+          - redis-node-6:7006
+        max-redirects: 3
+
+outbox:
+  topic: order-events
+  polling-ms: 200
