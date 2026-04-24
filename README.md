@@ -5,7 +5,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF?logo=kotlin)](https://kotlinlang.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.5-6DB33F?logo=spring)](https://spring.io/projects/spring-boot)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://www.postgresql.org/)
-[![Redis](https://img.shields.io/badge/Redis-7.0-DC382D?logo=redis)](https://redis.io/)
+[![Redis](https://img.shields.io/badge/Redis%20Cluster-7.0-DC382D?logo=redis)](https://redis.io/)
 [![Kafka](https://img.shields.io/badge/Kafka-3.7-231F20?logo=apache-kafka)](https://kafka.apache.org/)
 
 ---
@@ -46,7 +46,7 @@
 
 Infrastructure Layer:
 ├── PostgreSQL (Port 5432) - 각 서비스 DB
-├── Redis (Port 6379) - 재고 관리
+├── Redis Cluster (Port 7001-7006) - 재고 관리 (3 마스터 + 3 레플리카)
 └── Kafka (Port 9092) - 이벤트 브로커
 ```
 
@@ -197,12 +197,15 @@ fun expireReservedOrders() {
 - **Framework**: Spring Boot 3.3.5
 - **ORM**: Spring Data JPA (Hibernate)
 - **Database**: PostgreSQL 16
-- **Cache**: Redis 7.0
+- **Cache**: Redis Cluster 7.0
 - **Message Queue**: Apache Kafka 3.7.0
 - **Build Tool**: Gradle 8.x
 
 ### Infrastructure
 - **Container**: Docker, Docker Compose
+- **Database**: PostgreSQL 16 (각 서비스별 DB)
+- **Cache**: Redis Cluster 7.0 (6노드: 3 마스터 + 3 레플리카)
+- **Message Queue**: Apache Kafka 3.7.0 (KRaft 모드)
 - **Logging**: Kotlin Logging
 
 ---
@@ -211,32 +214,74 @@ fun expireReservedOrders() {
 
 ### 사전 요구사항
 
-- JDK 17+
 - Docker & Docker Compose
+- Docker Hub 계정 (이미지 Pull용)
 
-### 1. 인프라 실행
+### 실행 방법
 
-```bash
-# PostgreSQL, Redis, Kafka 실행
-docker-compose up -d
-
-# 확인
-docker ps
-```
-
-### 2. 서비스 실행
+#### Option 1: Docker Hub에서 Pull & 실행 (추천) 🚀
 
 ```bash
-# 전체 빌드
-./gradlew build
+# 최신 이미지 Pull & 전체 시스템 실행
+./pull-and-start.sh
 
-# 각 서비스 실행 (별도 터미널)
-./gradlew :order-service:bootRun
-./gradlew :payment-service:bootRun
-./gradlew :shipping-service:bootRun
+# 또는
+./start-all.sh
 ```
 
-### 3. 주문 생성 테스트
+**자동 실행 내용:**
+- PostgreSQL (4개 DB 자동 생성)
+- Redis Cluster (6노드: 3 마스터 + 3 레플리카)
+- Kafka (KRaft 모드)
+- Order Service (8081)
+- Payment Service (8082)
+- Shipping Service (8083)
+
+#### Option 2: 로컬에서 빌드 & Docker Hub 푸시 (개발자)
+
+```bash
+# 1. Docker Hub 로그인
+docker login
+
+# 2. 빌드 & 푸시 (5-10분 소요)
+./build-and-push.sh
+
+# 3. 실행
+./pull-and-start.sh
+```
+
+#### Option 3: IntelliJ에서 개별 서비스 실행 (디버깅용)
+
+```bash
+# 1. 인프라만 실행
+docker-compose up -d postgres redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6 kafka
+
+# 2. IntelliJ에서 각 서비스 실행
+# Run → OrderServiceApplication
+# Run → PaymentServiceApplication
+# Run → ShippingServiceApplication
+```
+
+---
+
+### 시스템 확인
+
+```bash
+# 컨테이너 상태
+docker-compose ps
+
+# 서비스 헬스체크
+curl http://localhost:8081/actuator/health  # Order Service
+curl http://localhost:8082/actuator/health  # Payment Service
+curl http://localhost:8083/actuator/health  # Shipping Service
+
+# Redis Cluster 상태
+docker exec -it redis-node-1 redis-cli -p 7001 cluster nodes
+```
+
+---
+
+### 주문 생성 테스트
 
 ```bash
 # 주문 생성
@@ -252,7 +297,7 @@ curl -X POST http://localhost:8081/orders \
 # 성공 시 응답: ["<order-uuid>"]
 ```
 
-### 4. 결제 처리 (Webhook)
+### 결제 처리 (Webhook)
 
 ```bash
 # 결제 성공
@@ -271,6 +316,12 @@ curl -X POST http://localhost:8082/payments/webhook \
     "orderId": "<order-uuid>",
     "result": "FAILURE"
   }'
+```
+
+### 전체 시스템 종료
+
+```bash
+./stop-all.sh
 ```
 
 ---

@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Build artifacts
+**/build/
+**/target/
+.gradle/
+out/
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Scripts
+*.sh
+*.md
+
+# Documentation
+README.md
+DOCKER-README.md
+DOCKER-HUB-GUIDE.md
+DEV-INFRASTRUCTURE.md
+
+# Backup
+backup-old-docker-files/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+**/test/
+**/*Test.kt
+**/*Test.java
+
+# Temporary files
+*.tmp
+*.swp
+*~

@@ -204,9 +204,7 @@ services:
   # ========================================
   
   order-service:
-    build:
-      context: .
-      dockerfile: order-service/Dockerfile
+    image: jybeomss1/order-service:latest
     container_name: order-service
     ports:
       - "8081:8081"
@@ -234,9 +232,7 @@ services:
     restart: on-failure
 
   payment-service:
-    build:
-      context: .
-      dockerfile: payment-service/Dockerfile
+    image: jybeomss1/payment-service:latest
     container_name: payment-service
     ports:
       - "8082:8082"
@@ -252,9 +248,7 @@ services:
     restart: on-failure
 
   shipping-service:
-    build:
-      context: .
-      dockerfile: shipping-service/Dockerfile
+    image: jybeomss1/shipping-service:latest
     container_name: shipping-service
     ports:
       - "8083:8083"
