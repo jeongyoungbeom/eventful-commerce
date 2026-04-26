@@ -13,6 +13,9 @@ class Orders(
     val userId: UUID,
 
     @Column(nullable = false)
+    val productId: String,
+
+    @Column(nullable = false)
     val totalAmount: Long,
 
     @Enumerated(EnumType.STRING)

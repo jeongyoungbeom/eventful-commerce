@@ -30,7 +30,8 @@ class OrdersService(
     private val outboxEventService: OutboxEventService,
     private val inventoryReservationService: InventoryReservationService,
     private val idempotencyHandler: IdempotencyHandler,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val orderCancelService: OrderCancelService
 ) {
     private val ttlSeconds = 10 * 60L
 
@@ -46,17 +47,17 @@ class OrdersService(
         val reservationResults = mutableListOf<Pair<Orders, UUID?>>()
 
         for (order in savedOrders) {
-            val reservationId = inventoryReservationService.reserve(order.id, ttlSeconds)
+            val reservationId = inventoryReservationService.reserve(order.productId, order.id, ttlSeconds)
             reservationResults.add(order to reservationId)
 
-            // ⚠️ 하나라도 실패하면 즉시 전체 롤백!
+            // 하나라도 실패하면 즉시 전체 롤백!
             if (reservationId == null) {
                 logger.warn { "재고 부족 발견 - 전체 주문 롤백: orderId=${order.id}" }
 
                 // 이미 예약한 재고들 모두 해제
                 reservationResults.forEach { (prevOrder, prevReservationId) ->
                     if (prevReservationId != null) {
-                        inventoryReservationService.release(prevReservationId)
+                        inventoryReservationService.release(prevOrder.productId, prevReservationId)
                         logger.info { "재고 예약 롤백: orderId=${prevOrder.id}, reservationId=$prevReservationId" }
                     }
                 }
@@ -86,6 +87,7 @@ class OrdersService(
                 OrderReservedPayload(
                     orderId = order.id,
                     userId = order.userId,
+                    productId = order.productId,
                     totalAmount = order.totalAmount,
                     reservationId = order.reservationId!!,
                     expiresAt = order.expiresAt,
@@ -103,7 +105,6 @@ class OrdersService(
         }
 
         outboxEventService.record(events)
-        inventoryReservationService.getStockSummary()
 
         logger.info { "주문 처리 완료 - 결제 서비스로 전송: ${savedOrders.size}건" }
 
@@ -135,7 +136,7 @@ class OrdersService(
             }
 
             logger.info { "결제 완료 - 재고 확정: orderId=${order.id}, reservationId=$reservationId" }
-            inventoryReservationService.commit(reservationId)
+            inventoryReservationService.commit(order.productId, reservationId)
 
             order.status = OrdersStatus.ORDER_CONFIRMED
             ordersRepository.save(order)
@@ -164,26 +165,14 @@ class OrdersService(
     fun handlePaymentFailed(value: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(value.eventId) {
             val payload = objectMapper.readValue(value.payload, PaymentFailedPayload::class.java)
-            val order = ordersRepository.findById(payload.orderId).orElseThrow {
-                IllegalStateException("주문을 찾을 수 없습니다: orderId=${payload.orderId}")
-            }
-
-            if (order.status != OrdersStatus.ORDER_RESERVED) {
-                logger.warn { "예약 상태가 아닌 주문의 결제 실패 처리: orderId=${order.id}, status=${order.status}" }
-                return@executeIdempotent
-            }
-
-            val reservationId = order.reservationId
-            if (reservationId != null) {
-                logger.info { "결제 실패 - 재고 해제: orderId=${order.id}, reservationId=$reservationId" }
-                inventoryReservationService.release(reservationId)
-            } else {
-                logger.warn { "예약 ID가 없습니다: orderId=${order.id}" }
-            }
-
-            order.status = OrdersStatus.ORDER_CANCELED
-            ordersRepository.save(order)
-            logger.info { "주문 취소 완료: orderId=${order.id}" }
+            orderCancelService.cancel(payload.orderId, "결제 실패")
         }
+    }
+
+    /**
+     * 사용자 수동 취소
+     */
+    fun cancelOrder(orderId: UUID): Boolean {
+        return orderCancelService.cancel(orderId, "사용자 요청")
     }
 }

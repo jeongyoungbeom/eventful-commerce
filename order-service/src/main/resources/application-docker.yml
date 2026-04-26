@@ -38,6 +38,11 @@ spring:
           - redis-node-5:7005
           - redis-node-6:7006
         max-redirects: 3
+      lettuce:
+        cluster:
+          refresh:
+            adaptive: true  # 클러스터 변경사항 자동 감지
+            period: 30s     # 30초마다 토폴로지 갱신
 
 outbox:
   topic: order-events

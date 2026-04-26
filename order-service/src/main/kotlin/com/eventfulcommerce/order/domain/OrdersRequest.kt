@@ -5,11 +5,13 @@ import java.util.*
 
 data class OrdersRequest(
     val userId: String,
+    val productId: String,
     val totalAmount: Long
 ) {
     fun toEntity(): Orders {
         return Orders(
             userId = UUID.fromString(userId),
+            productId = productId,
             totalAmount = totalAmount,
             status = OrdersStatus.ORDER_RESERVED,
         )

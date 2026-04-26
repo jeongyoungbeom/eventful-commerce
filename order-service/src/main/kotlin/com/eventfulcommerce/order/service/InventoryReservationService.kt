@@ -31,46 +31,47 @@ class InventoryReservationService(
 
 
     /*
-        앞에 {inventory{ 붙이는 이유는 3개 키가 모두 같은 노드에 저장되도록 하기 위함.
+        앞에 {product:$productId} 붙이는 이유는 각 상품별 3개 키가 모두 같은 노드에 저장되도록 하기 위함.
+        각 상품은 서로 다른 노드에 분산되어 부하 분산 효과.
      */
-    private fun stockKey() = "{inventory}:stock:default"
-    private fun holdCountKey() = "{inventory}:holdCount:default"
-    private fun holdKey(reservationId: UUID) = "{inventory}:hold:$reservationId"
+    private fun stockKey(productId: String) = "{product:$productId}:stock"
+    private fun holdCountKey(productId: String) = "{product:$productId}:holdCount"
+    private fun holdKey(productId: String, reservationId: UUID) = "{product:$productId}:hold:$reservationId"
 
-    fun reserve(orderId: UUID, ttlSeconds: Long): UUID? {
+    fun reserve(productId: String, orderId: UUID, ttlSeconds: Long): UUID? {
         val reservationId = UUID.randomUUID()
         val holdValue = objectMapper.writeValueAsString(mapOf("orderId" to orderId.toString()))
 
         val ok = redisTemplate.execute(
             reserveScript,
-            listOf(stockKey(), holdKey(reservationId), holdCountKey()),
+            listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId)),
             ttlSeconds.toString(),
             holdValue
         ) ?: 0L
 
         val success = ok == 1L
         if (success) {
-            logger.debug { "재고 예약 성공: orderId=$orderId, reservationId=$reservationId" }
+            logger.debug { "재고 예약 성공: productId=$productId, orderId=$orderId, reservationId=$reservationId" }
         } else {
-            logger.warn { "재고 예약 실패 - 재고 부족: orderId=$orderId" }
+            logger.warn { "재고 예약 실패 - 재고 부족: productId=$productId, orderId=$orderId" }
         }
         
         return if (success) reservationId else null
     }
 
-    fun commit(reservationId: UUID) {
-        redisTemplate.execute(commitScript, listOf(holdKey(reservationId), holdCountKey()))
-        logger.debug { "재고 확정: reservationId=$reservationId" }
+    fun commit(productId: String, reservationId: UUID) {
+        redisTemplate.execute(commitScript, listOf(holdKey(productId, reservationId), holdCountKey(productId)))
+        logger.debug { "재고 확정: productId=$productId, reservationId=$reservationId" }
     }
 
-    fun release(reservationId: UUID) {
-        redisTemplate.execute(releaseScript, listOf(stockKey(), holdKey(reservationId), holdCountKey()))
-        logger.debug { "재고 해제: reservationId=$reservationId" }
+    fun release(productId: String, reservationId: UUID) {
+        redisTemplate.execute(releaseScript, listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId)))
+        logger.debug { "재고 해제: productId=$productId, reservationId=$reservationId" }
     }
 
-    fun getStockSummary() {
-        val stock = redisTemplate.opsForValue().get(stockKey())?.toLong() ?: 0L
-        val holds = redisTemplate.opsForValue().get(holdCountKey())?.toLong() ?: 0L
-        logger.info { "재고 현황 - 가용: $stock, 예약 중: $holds" }
+    fun getStockSummary(productId: String) {
+        val stock = redisTemplate.opsForValue().get(stockKey(productId))?.toLong() ?: 0L
+        val holds = redisTemplate.opsForValue().get(holdCountKey(productId))?.toLong() ?: 0L
+        logger.info { "재고 현황 - productId=$productId, 가용: $stock, 예약 중: $holds" }
     }
 }

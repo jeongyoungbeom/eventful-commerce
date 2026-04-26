@@ -6,6 +6,7 @@ import java.util.UUID
 data class OrderReservedPayload(
     val orderId: UUID,
     val userId: UUID,
+    val productId: String,
     val reservationId: UUID,
     val totalAmount: Long,
     val expiresAt: Instant?,
