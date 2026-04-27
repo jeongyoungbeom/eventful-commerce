@@ -1,7 +1,12 @@
 package com.eventfulcommerce.order.service
 
+import com.eventfulcommerce.common.OrderCanceledPayload
+import com.eventfulcommerce.common.OutboxEvent
+import com.eventfulcommerce.common.OutboxEventService
+import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.repository.OrdersRepository
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -18,7 +23,9 @@ private val logger = KotlinLogging.logger {}
 @Service
 class OrderCancelExecutor(
     private val ordersRepository: OrdersRepository,
-    private val inventoryReservationService: InventoryReservationService
+    private val inventoryReservationService: InventoryReservationService,
+    private val outboxEventService: OutboxEventService,
+    private val objectMapper: ObjectMapper
 ) {
 
     /**
@@ -51,6 +58,23 @@ class OrderCancelExecutor(
         // 4. 주문 상태 변경
         order.status = OrdersStatus.ORDER_CANCELED
         ordersRepository.save(order)
+
+        // 5. ORDER_CANCELED 이벤트 발행
+        val payload = OrderCanceledPayload(
+            orderId = orderId,
+            userId = order.userId,
+            reason = reason
+        )
+
+        val outboxEvent = OutboxEvent(
+            aggregateType = OrdersStatus.ORDER_CANCELED.toString(),
+            aggregateId = orderId,
+            eventType = "ORDER_CANCELED",
+            payload = objectMapper.writeValueAsString(payload),
+            status = OutboxStatus.PENDING
+        )
+
+        outboxEventService.record(listOf(outboxEvent))
         
         logger.info { "✅ 주문 취소 완료: orderId=$orderId, reason=$reason" }
         return true

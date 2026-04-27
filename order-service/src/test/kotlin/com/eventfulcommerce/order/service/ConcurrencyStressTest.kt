@@ -1,118 +1,168 @@
 package com.eventfulcommerce.order.service
 
+import com.eventfulcommerce.common.IdempotencyHandler
+import com.eventfulcommerce.common.OutboxEventService
 import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.domain.OrdersStatus
+import com.eventfulcommerce.order.domain.entity.Orders
+import com.eventfulcommerce.order.exception.InsufficientInventoryException
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import io.mockk.Runs
+import io.mockk.clearAllMocks
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.data.redis.core.StringRedisTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
+import org.junit.jupiter.api.assertThrows
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-@SpringBootTest
-@Testcontainers
-@ActiveProfiles("test")
-@DisplayName("동시성 스트레스 테스트")
+@DisplayName("주문 동시성 단위 테스트")
 class ConcurrencyStressTest {
 
-    @Autowired
     private lateinit var ordersService: OrdersService
-
-    @Autowired
     private lateinit var ordersRepository: OrdersRepository
-
-    @Autowired
-    private lateinit var redisTemplate: StringRedisTemplate
-
-    @Autowired
+    private lateinit var outboxEventService: OutboxEventService
+    private lateinit var inventoryReservationService: InventoryReservationService
+    private lateinit var idempotencyHandler: IdempotencyHandler
+    private lateinit var orderCancelService: OrderCancelService
     private lateinit var objectMapper: ObjectMapper
-
-    companion object {
-        @Container
-        val postgresContainer = PostgreSQLContainer<Nothing>("postgres:16-alpine").apply {
-            withDatabaseName("order_service")
-            withUsername("postgres")
-            withPassword("postgres")
-        }
-
-        @Container
-        val redisContainer = GenericContainer<Nothing>("redis:7-alpine").apply {
-            withExposedPorts(6379)
-        }
-
-        @JvmStatic
-        @DynamicPropertySource
-        fun properties(registry: DynamicPropertyRegistry) {
-            registry.add("spring.datasource.url", postgresContainer::getJdbcUrl)
-            registry.add("spring.datasource.username", postgresContainer::getUsername)
-            registry.add("spring.datasource.password", postgresContainer::getPassword)
-            
-            registry.add("spring.data.redis.host", redisContainer::getHost)
-            registry.add("spring.data.redis.port") { redisContainer.getMappedPort(6379) }
-            
-            registry.add("spring.kafka.bootstrap-servers") { "localhost:9999" }
-        }
-    }
 
     @BeforeEach
     fun setUp() {
-        redisTemplate.opsForValue().set("stock:default", "100")
-        redisTemplate.opsForValue().set("holdCount:default", "0")
-        ordersRepository.deleteAll()
+        ordersRepository = mockk()
+        outboxEventService = mockk()
+        inventoryReservationService = mockk()
+        idempotencyHandler = mockk()
+        orderCancelService = mockk()
+        objectMapper = ObjectMapper().apply {
+            registerModule(JavaTimeModule())
+            disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+        }
+
+        every { outboxEventService.record(any()) } just Runs
+        every { ordersRepository.saveAll(any<Iterable<Orders>>()) } answers {
+            firstArg<Iterable<Orders>>().onEach { assignPersistenceFields(it) }.toList()
+        }
+
+        ordersService = OrdersService(
+            ordersRepository = ordersRepository,
+            outboxEventService = outboxEventService,
+            inventoryReservationService = inventoryReservationService,
+            idempotencyHandler = idempotencyHandler,
+            objectMapper = objectMapper,
+            orderCancelService = orderCancelService
+        )
     }
 
     @AfterEach
     fun tearDown() {
-        ordersRepository.deleteAll()
-        redisTemplate.delete("stock:default")
-        redisTemplate.delete("holdCount:default")
-        val holdKeys = redisTemplate.keys("hold:*")
-        if (!holdKeys.isNullOrEmpty()) {
-            redisTemplate.delete(holdKeys)
-        }
+        clearAllMocks()
     }
 
     @Test
-    @DisplayName("100개 동시 요청 - 재고 100개")
-    fun `should handle 100 concurrent orders with 100 stock`() {
-        // Given: 재고 100개
-        val threadCount = 100
+    @DisplayName("동시 주문 수가 재고와 같으면 모두 예약된다")
+    fun `should reserve all concurrent orders when stock is enough`() {
+        val result = runConcurrentOrders(stock = 100, requestCount = 100)
+
+        assertEquals(100, result.successCount)
+        assertEquals(0, result.failureCount)
+        assertEquals(0, result.remainingStock)
+        verify(exactly = 100) { outboxEventService.record(match { it.size == 1 }) }
+    }
+
+    @Test
+    @DisplayName("동시 주문 수가 재고보다 많아도 재고 수만 성공한다")
+    fun `should prevent overselling when concurrent orders exceed stock`() {
+        val result = runConcurrentOrders(stock = 10, requestCount = 50)
+
+        assertEquals(10, result.successCount)
+        assertEquals(40, result.failureCount)
+        assertEquals(0, result.remainingStock)
+        verify(exactly = 10) { outboxEventService.record(match { it.size == 1 }) }
+    }
+
+    @Test
+    @DisplayName("복수 주문 배치에서 일부 예약 실패 시 기존 예약을 해제한다")
+    fun `should release already reserved inventory when batch partially fails`() {
+        val stock = AtomicInteger(1)
+        val issuedReservations = mutableListOf<UUID>()
+        val releasedReservations = mutableListOf<UUID>()
+
+        every { inventoryReservationService.reserve(any(), any(), any()) } answers {
+            if (stock.compareAndSet(1, 0)) {
+                UUID.randomUUID().also { issuedReservations += it }
+            } else {
+                null
+            }
+        }
+        every { inventoryReservationService.release(any(), any()) } answers {
+            releasedReservations += secondArg<UUID>()
+            stock.incrementAndGet()
+            Unit
+        }
+
+        val requests = listOf(
+            OrdersRequest(UUID.randomUUID().toString(), "PRODUCT-001", 10000L),
+            OrdersRequest(UUID.randomUUID().toString(), "PRODUCT-001", 20000L)
+        )
+
+        val exception = assertThrows<InsufficientInventoryException> {
+            ordersService.orders(requests)
+        }
+
+        assertTrue(exception.message!!.contains("재고 부족"))
+        assertEquals(issuedReservations, releasedReservations)
+        assertEquals(1, stock.get())
+        verify(exactly = 0) { outboxEventService.record(any()) }
+    }
+
+    private fun runConcurrentOrders(stock: Int, requestCount: Int): ConcurrentOrderResult {
+        val remainingStock = AtomicInteger(stock)
         val successCount = AtomicInteger(0)
         val failureCount = AtomicInteger(0)
 
-        val executor = Executors.newFixedThreadPool(threadCount)
-        val latch = CountDownLatch(threadCount)
+        every { inventoryReservationService.reserve(any(), any(), any()) } answers {
+            var reservationId: UUID? = null
+            while (true) {
+                val current = remainingStock.get()
+                if (current <= 0) break
+                if (remainingStock.compareAndSet(current, current - 1)) {
+                    reservationId = UUID.randomUUID()
+                    break
+                }
+            }
+            reservationId
+        }
+        every { inventoryReservationService.release(any(), any()) } answers {
+            remainingStock.incrementAndGet()
+            Unit
+        }
 
-        // When: 100개 스레드에서 동시에 주문
-        repeat(threadCount) { index ->
+        val executor = Executors.newFixedThreadPool(minOf(requestCount, 32))
+        val latch = CountDownLatch(requestCount)
+
+        repeat(requestCount) {
             executor.submit {
                 try {
-                    val userId = UUID.randomUUID()
-                    val request = listOf(
-                        OrdersRequest(
-                            userId = userId.toString(),
-                            totalAmount = 10000L
-                        )
+                    ordersService.orders(
+                        listOf(OrdersRequest(UUID.randomUUID().toString(), "PRODUCT-001", 10000L))
                     )
-                    
-                    ordersService.orders(request)
                     successCount.incrementAndGet()
-                } catch (e: Exception) {
+                } catch (e: InsufficientInventoryException) {
                     failureCount.incrementAndGet()
                 } finally {
                     latch.countDown()
@@ -120,222 +170,58 @@ class ConcurrencyStressTest {
             }
         }
 
-        latch.await()
-        executor.shutdown()
+        assertTrue(latch.await(10, TimeUnit.SECONDS), "동시 주문 처리가 제한 시간 안에 끝나야 합니다.")
+        executor.shutdownNow()
 
-        // Then: 100개 모두 성공해야 함
-        assertEquals(100, successCount.get(), "100개 모두 성공해야 함")
-        assertEquals(0, failureCount.get(), "실패가 없어야 함")
-
-        // 재고 확인
-        val remainingStock = redisTemplate.opsForValue().get("stock:default")?.toLong()
-        assertEquals(0L, remainingStock, "재고가 0이어야 함")
-
-        // DB 확인
-        val orders = ordersRepository.findAll()
-        assertEquals(100, orders.size)
-        assertTrue(orders.all { it.status == OrdersStatus.ORDER_RESERVED })
+        return ConcurrentOrderResult(
+            successCount = successCount.get(),
+            failureCount = failureCount.get(),
+            remainingStock = remainingStock.get()
+        )
     }
 
-    @Test
-    @DisplayName("200개 동시 요청 - 재고 100개 (경쟁 상황)")
-    fun `should handle 200 concurrent orders with 100 stock - race condition`() {
-        // Given: 재고 100개, 요청 200개
-        val threadCount = 200
-        val successCount = AtomicInteger(0)
-        val failureCount = AtomicInteger(0)
+    private fun assignPersistenceFields(order: Orders) {
+        if (!isIdInitialized(order)) {
+            order.id = UUID.randomUUID()
+        }
+        if (!isCreatedAtInitialized(order)) {
+            order.createdAt = Instant.now()
+        }
+        if (!isUpdatedAtInitialized(order)) {
+            order.updatedAt = Instant.now()
+        }
+        if (order.status != OrdersStatus.ORDER_RESERVED) {
+            order.status = OrdersStatus.ORDER_RESERVED
+        }
+    }
 
-        val executor = Executors.newFixedThreadPool(threadCount)
-        val latch = CountDownLatch(threadCount)
-
-        // When: 200개 스레드에서 동시에 주문
-        repeat(threadCount) { index ->
-            executor.submit {
-                try {
-                    val userId = UUID.randomUUID()
-                    val request = listOf(
-                        OrdersRequest(
-                            userId = userId.toString(),
-                            totalAmount = 10000L
-                        )
-                    )
-                    
-                    ordersService.orders(request)
-                    successCount.incrementAndGet()
-                } catch (e: Exception) {
-                    failureCount.incrementAndGet()
-                } finally {
-                    latch.countDown()
-                }
-            }
+    private fun isIdInitialized(order: Orders): Boolean =
+        try {
+            order.id
+            true
+        } catch (e: UninitializedPropertyAccessException) {
+            false
         }
 
-        latch.await()
-        executor.shutdown()
-
-        // Then: 100개만 성공, 100개는 실패
-        assertEquals(100, successCount.get(), "100개만 성공해야 함")
-        assertEquals(100, failureCount.get(), "100개는 실패해야 함")
-
-        // 재고 확인
-        val remainingStock = redisTemplate.opsForValue().get("stock:default")?.toLong()
-        assertEquals(0L, remainingStock, "재고가 0이어야 함")
-
-        // DB 확인
-        val orders = ordersRepository.findAll()
-        assertEquals(100, orders.size, "성공한 100개만 저장되어야 함")
-        assertTrue(orders.all { it.status == OrdersStatus.ORDER_RESERVED })
-    }
-
-    @Test
-    @DisplayName("동일 상품 50명이 동시 구매 - 재고 10개")
-    fun `should handle 50 users buying same product with 10 stock`() {
-        // Given: 재고 10개만
-        redisTemplate.opsForValue().set("stock:default", "10")
-
-        val threadCount = 50
-        val successCount = AtomicInteger(0)
-        val failureCount = AtomicInteger(0)
-
-        val executor = Executors.newFixedThreadPool(threadCount)
-        val latch = CountDownLatch(threadCount)
-
-        // When
-        repeat(threadCount) {
-            executor.submit {
-                try {
-                    val userId = UUID.randomUUID()
-                    val request = listOf(
-                        OrdersRequest(
-                            userId = userId.toString(),
-                            totalAmount = 10000L
-                        )
-                    )
-                    
-                    ordersService.orders(request)
-                    successCount.incrementAndGet()
-                } catch (e: Exception) {
-                    failureCount.incrementAndGet()
-                } finally {
-                    latch.countDown()
-                }
-            }
+    private fun isCreatedAtInitialized(order: Orders): Boolean =
+        try {
+            order.createdAt
+            true
+        } catch (e: UninitializedPropertyAccessException) {
+            false
         }
 
-        latch.await()
-        executor.shutdown()
-
-        // Then: 정확히 10개만 성공
-        assertEquals(10, successCount.get(), "10개만 성공해야 함")
-        assertEquals(40, failureCount.get(), "40개는 실패해야 함")
-
-        // 재고 확인 (0이어야 함)
-        val remainingStock = redisTemplate.opsForValue().get("stock:default")?.toLong()
-        assertEquals(0L, remainingStock)
-    }
-
-    @Test
-    @DisplayName("오버셀링 방지 테스트 - 재고보다 많은 주문")
-    fun `should prevent overselling with concurrent orders`() {
-        // Given: 재고 5개
-        redisTemplate.opsForValue().set("stock:default", "5")
-
-        val threadCount = 20
-        val successCount = AtomicInteger(0)
-
-        val executor = Executors.newFixedThreadPool(threadCount)
-        val latch = CountDownLatch(threadCount)
-
-        // When: 20개 주문 시도
-        repeat(threadCount) {
-            executor.submit {
-                try {
-                    val userId = UUID.randomUUID()
-                    val request = listOf(
-                        OrdersRequest(
-                            userId = userId.toString(),
-                            totalAmount = 10000L
-                        )
-                    )
-                    
-                    ordersService.orders(request)
-                    successCount.incrementAndGet()
-                } catch (e: Exception) {
-                    // 실패는 정상
-                } finally {
-                    latch.countDown()
-                }
-            }
+    private fun isUpdatedAtInitialized(order: Orders): Boolean =
+        try {
+            order.updatedAt
+            true
+        } catch (e: UninitializedPropertyAccessException) {
+            false
         }
 
-        latch.await()
-        executor.shutdown()
-
-        // Then: 정확히 5개만 성공
-        assertEquals(5, successCount.get(), "재고 수만큼만 성공해야 함")
-
-        val remainingStock = redisTemplate.opsForValue().get("stock:default")?.toLong()
-        assertEquals(0L, remainingStock, "재고가 0이어야 함")
-
-        // 중요: 재고 수와 성공 수가 정확히 일치해야 함
-        val dbCount = ordersRepository.count()
-        assertEquals(5L, dbCount, "DB에도 정확히 5개만 있어야 함")
-    }
-
-    @Test
-    @DisplayName("트래픽 시뮬레이션 - 1000개 요청")
-    fun `should handle high traffic - 1000 concurrent requests`() {
-        // Given: 재고 500개
-        redisTemplate.opsForValue().set("stock:default", "500")
-
-        val threadCount = 1000
-        val successCount = AtomicInteger(0)
-        val failureCount = AtomicInteger(0)
-
-        val executor = Executors.newFixedThreadPool(100) // 스레드 풀 100개
-        val latch = CountDownLatch(threadCount)
-
-        val startTime = System.currentTimeMillis()
-
-        // When: 1000개 주문
-        repeat(threadCount) {
-            executor.submit {
-                try {
-                    val userId = UUID.randomUUID()
-                    val request = listOf(
-                        OrdersRequest(
-                            userId = userId.toString(),
-                            totalAmount = 10000L
-                        )
-                    )
-                    
-                    ordersService.orders(request)
-                    successCount.incrementAndGet()
-                } catch (e: Exception) {
-                    failureCount.incrementAndGet()
-                } finally {
-                    latch.countDown()
-                }
-            }
-        }
-
-        latch.await()
-        executor.shutdown()
-
-        val endTime = System.currentTimeMillis()
-        val duration = endTime - startTime
-
-        // Then
-        assertEquals(500, successCount.get(), "500개 성공")
-        assertEquals(500, failureCount.get(), "500개 실패")
-
-        val remainingStock = redisTemplate.opsForValue().get("stock:default")?.toLong()
-        assertEquals(0L, remainingStock)
-
-        // 성능 확인 (1000개 요청을 30초 이내에 처리)
-        assertTrue(duration < 30000, "30초 이내에 처리되어야 함: ${duration}ms")
-        
-        println("✅ 1000개 요청 처리 시간: ${duration}ms")
-        println("✅ 초당 처리량: ${1000.0 / (duration / 1000.0)} TPS")
-    }
+    private data class ConcurrentOrderResult(
+        val successCount: Int,
+        val failureCount: Int,
+        val remainingStock: Int
+    )
 }

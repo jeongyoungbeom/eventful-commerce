@@ -12,9 +12,19 @@ class InventoryBootstrap {
     @Bean
     @Profile("dev")
     fun initStock(template: StringRedisTemplate) = ApplicationRunner {
-        val key = "{inventory}:stock:default"
-        if (template.hasKey(key) != true) {
-            template.opsForValue().set(key, "100")
+        val productIds = listOf("PRODUCT-001", "PRODUCT-002", "PRODUCT-003")
+
+        productIds.forEach { productId ->
+            val stockKey = "{product:$productId}:stock"
+            val holdCountKey = "{product:$productId}:holdCount"
+
+            if (!template.hasKey(stockKey)) {
+                template.opsForValue().set(stockKey, "100")
+            }
+
+            if (!template.hasKey(holdCountKey)) {
+                template.opsForValue().set(holdCountKey, "0")
+            }
         }
     }
 }

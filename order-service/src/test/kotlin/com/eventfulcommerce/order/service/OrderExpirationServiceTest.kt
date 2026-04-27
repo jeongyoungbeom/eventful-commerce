@@ -1,32 +1,24 @@
 package com.eventfulcommerce.order.service
 
-import com.eventfulcommerce.order.domain.OrdersStatus
-import com.eventfulcommerce.order.domain.entity.Orders
-import com.eventfulcommerce.order.repository.OrdersRepository
 import io.mockk.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
-import java.time.Instant
 import java.util.*
 
 @DisplayName("주문 만료 서비스 테스트")
 class OrderExpirationServiceTest {
 
     private lateinit var orderExpirationService: OrderExpirationService
-    private lateinit var ordersRepository: OrdersRepository
-    private lateinit var inventoryReservationService: InventoryReservationService
+    private lateinit var orderCancelService: OrderCancelService
 
     @BeforeEach
     fun setUp() {
-        ordersRepository = mockk()
-        inventoryReservationService = mockk()
-
+        orderCancelService = mockk()
         orderExpirationService = OrderExpirationService(
-            ordersRepository = ordersRepository,
-            inventoryReservationService = inventoryReservationService
+            orderCancelService = orderCancelService
         )
     }
 
@@ -36,97 +28,46 @@ class OrderExpirationServiceTest {
     }
 
     @Test
-    @DisplayName("ORDER_RESERVED 상태의 주문이 만료된다")
-    fun `should expire order in RESERVED status`() {
+    @DisplayName("주문 만료 처리가 OrderCancelService를 호출한다")
+    fun `should call OrderCancelService when expiring order`() {
         // Given
         val orderId = UUID.randomUUID()
-        val reservationId = UUID.randomUUID()
-        
-        val order = Orders(
-            userId = UUID.randomUUID(),
-            totalAmount = 10000L,
-            status = OrdersStatus.ORDER_RESERVED,
-            reservationId = reservationId,
-            expiresAt = Instant.now().minusSeconds(10)
-        ).apply {
-            id = orderId
-        }
-
-        every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { inventoryReservationService.release(reservationId) } just Runs
-        every { ordersRepository.save(any()) } returns order
+        every { orderCancelService.cancel(orderId, "주문 만료") } returns true
 
         // When
         orderExpirationService.expireOrder(orderId)
 
         // Then
-        assertEquals(OrdersStatus.ORDER_EXPIRED, order.status)
-        verify(exactly = 1) { inventoryReservationService.release(reservationId) }
-        verify(exactly = 1) { ordersRepository.save(order) }
-    }
-
-            @Test
-            @DisplayName("이미 CONFIRMED 상태면 만료하지 않는다")
-            fun `should not expire order already in CONFIRMED status`() {
-                // Given
-                val orderId = UUID.randomUUID()
-                val order = Orders(
-                    userId = UUID.randomUUID(),
-                    totalAmount = 10000L,
-                    status = OrdersStatus.ORDER_CONFIRMED
-                ).apply {
-                    id = orderId
-                }
-
-                every { ordersRepository.findById(orderId) } returns Optional.of(order)
-
-        // When
-        orderExpirationService.expireOrder(orderId)
-
-        // Then
-        assertEquals(OrdersStatus.ORDER_CONFIRMED, order.status)
-        verify(exactly = 0) { inventoryReservationService.release(any()) }
-        verify(exactly = 0) { ordersRepository.save(any()) }
+        verify(exactly = 1) { orderCancelService.cancel(orderId, "주문 만료") }
     }
 
     @Test
-    @DisplayName("주문이 존재하지 않으면 아무 작업도 하지 않는다")
-    fun `should do nothing when order not found`() {
+    @DisplayName("주문 만료 실패 시에도 정상 처리된다")
+    fun `should handle failure gracefully`() {
         // Given
         val orderId = UUID.randomUUID()
-        every { ordersRepository.findById(orderId) } returns Optional.empty()
+        every { orderCancelService.cancel(orderId, "주문 만료") } returns false
 
         // When
         orderExpirationService.expireOrder(orderId)
 
         // Then
-        verify(exactly = 0) { inventoryReservationService.release(any()) }
-        verify(exactly = 0) { ordersRepository.save(any()) }
+        verify(exactly = 1) { orderCancelService.cancel(orderId, "주문 만료") }
     }
 
     @Test
-    @DisplayName("reservationId가 없어도 만료 처리된다")
-    fun `should expire order even without reservationId`() {
+    @DisplayName("여러 주문을 순차적으로 만료 처리한다")
+    fun `should expire multiple orders sequentially`() {
         // Given
-        val orderId = UUID.randomUUID()
-        val order = Orders(
-            userId = UUID.randomUUID(),
-            totalAmount = 10000L,
-            status = OrdersStatus.ORDER_RESERVED,
-            reservationId = null
-        ).apply {
-            id = orderId
-        }
-
-        every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { ordersRepository.save(any()) } returns order
+        val orderIds = listOf(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
+        every { orderCancelService.cancel(any(), "주문 만료") } returns true
 
         // When
-        orderExpirationService.expireOrder(orderId)
+        orderIds.forEach { orderExpirationService.expireOrder(it) }
 
         // Then
-        assertEquals(OrdersStatus.ORDER_EXPIRED, order.status)
-        verify(exactly = 0) { inventoryReservationService.release(any()) }
-        verify(exactly = 1) { ordersRepository.save(order) }
+        orderIds.forEach { orderId ->
+            verify(exactly = 1) { orderCancelService.cancel(orderId, "주문 만료") }
+        }
     }
 }

@@ -7,6 +7,7 @@ DOCKER_USERNAME="jybeomss1"
 ORDER_IMAGE="${DOCKER_USERNAME}/order-service:latest"
 PAYMENT_IMAGE="${DOCKER_USERNAME}/payment-service:latest"
 SHIPPING_IMAGE="${DOCKER_USERNAME}/shipping-service:latest"
+NOTIFICATION_IMAGE="${DOCKER_USERNAME}/notification-service:latest"
 
 echo "🐳 Building and Pushing to Docker Hub"
 echo "=========================================="
@@ -61,6 +62,15 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 echo "✅ shipping-service built successfully"
+echo ""
+
+echo "🔨 Building notification-service..."
+docker build -f notification-service/Dockerfile -t ${NOTIFICATION_IMAGE} .
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to build notification-service"
+    exit 1
+fi
+echo "✅ notification-service built successfully"
 echo ""
 
 # Push to Docker Hub

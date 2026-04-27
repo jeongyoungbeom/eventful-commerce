@@ -264,6 +264,26 @@ services:
       - eventful-network
     restart: on-failure
 
+  notification-service:
+    image: jybeomss1/notification-service:latest
+    container_name: notification-service
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-your-bot-token-here}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-eventful_commerce_bot}
+      - TELEGRAM_DEFAULT_USER_ID=${TELEGRAM_DEFAULT_USER_ID:-}
+      - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - eventful-network
+    restart: on-failure
+
 volumes:
   postgres_data:
   redis-node-1-data:

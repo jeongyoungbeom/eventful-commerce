@@ -1,0 +1,70 @@
+#!/bin/bash
+
+set -e
+
+echo "=========================================="
+echo "텔레그램 사용자 등록"
+echo "=========================================="
+
+# PostgreSQL 접속 정보
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:eventful-postgres}"
+DB_USER="${DB_USER:postgres}"
+DB_PASSWORD="${DB_PASSWORD:postgres}"
+DB_NAME="notification_service"
+
+# 테스트 사용자 정보 (환경변수로 설정 가능)
+USER_ID="${TEST_USER_ID:297a520a-f08d-4ca9-8ec9-5bfe21c0575a}"
+CHAT_ID="${TEST_CHAT_ID:5660988115}"
+
+echo ""
+echo "📝 테스트 사용자 정보:"
+echo "  User ID:  $USER_ID"
+echo "  Chat ID:  $CHAT_ID"
+echo ""
+
+# 기존 등록 확인
+EXISTING_COUNT=$(docker exec -e PGPASSWORD="$DB_PASSWORD" "$POSTGRES_CONTAINER" \
+    psql -U "$DB_USER" -d "$DB_NAME" -tAc \
+    "SELECT COUNT(*) FROM user_chat_ids WHERE userid = '$USER_ID';")
+
+EXISTING_COUNT=$(echo "$EXISTING_COUNT" | tr -d '[:space:]')
+
+if [ "$EXISTING_COUNT" -gt 0 ]; then
+    echo "⚠️  이미 등록된 사용자입니다. 업데이트합니다..."
+
+    docker exec -e PGPASSWORD="$DB_PASSWORD" "$POSTGRES_CONTAINER" \
+        psql -U "$DB_USER" -d "$DB_NAME" -c \
+        "UPDATE user_chat_ids SET chatid = $CHAT_ID WHERE userid = '$USER_ID';"
+
+    echo "✅ 사용자 업데이트 완료!"
+else
+    echo "📝 새 사용자 등록 중..."
+
+    docker exec -e PGPASSWORD="$DB_PASSWORD" "$POSTGRES_CONTAINER" \
+        psql -U "$DB_USER" -d "$DB_NAME" -c \
+        "INSERT INTO user_chat_ids (id, userid, chatid, createdat)
+         VALUES (gen_random_uuid(), '$USER_ID'::uuid, $CHAT_ID, NOW());"
+
+    echo "✅ 사용자 등록 완료!"
+fi
+
+echo ""
+echo "📋 등록된 사용자 확인:"
+docker exec -e PGPASSWORD="$DB_PASSWORD" "$POSTGRES_CONTAINER" \
+    psql -U "$DB_USER" -d "$DB_NAME" -c \
+    "SELECT userid, chatid, createdat FROM user_chat_ids WHERE userid = '$USER_ID';"
+
+echo ""
+echo "=========================================="
+echo "등록 완료!"
+echo "=========================================="
+echo ""
+echo "💡 실제 chat_id 확인 방법:"
+echo "1. 텔레그램에서 봇에게 메시지 전송"
+echo "2. 브라우저에서 접속:"
+echo "   https://api.telegram.org/bot{YOUR_BOT_TOKEN}/getUpdates"
+echo "3. 응답에서 'chat': {'id': 123456789} 확인"
+echo ""
+echo "💡 다른 사용자 등록:"
+echo "   TEST_USER_ID=xxx TEST_CHAT_ID=yyy ./scripts/init-telegram-users.sh"
+echo ""

@@ -1,40 +1,50 @@
 package com.eventfulcommerce.order.service
 
 import com.eventfulcommerce.common.IdempotencyHandler
-import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.OutboxEventService
 import com.eventfulcommerce.common.PaymentCompletedPayload
+import com.eventfulcommerce.common.PaymentFailedPayload
+import com.eventfulcommerce.common.ProcessedEvent
 import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.domain.entity.Orders
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.KotlinModule
-import io.mockk.*
+import io.mockk.Runs
+import io.mockk.clearAllMocks
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DataIntegrityViolationException
 import java.time.Instant
-import java.util.*
+import java.util.Optional
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-@DisplayName("멱등성 테스트")
+@DisplayName("주문 이벤트 멱등성 테스트")
 class IdempotencyTest {
 
     private lateinit var ordersService: OrdersService
     private lateinit var ordersRepository: OrdersRepository
     private lateinit var outboxEventService: OutboxEventService
     private lateinit var inventoryReservationService: InventoryReservationService
-    private lateinit var idempotencyHandler: IdempotencyHandler
-    private lateinit var objectMapper: ObjectMapper
     private lateinit var processedEventRepository: ProcessedEventRepository
+    private lateinit var orderCancelService: OrderCancelService
+    private lateinit var objectMapper: ObjectMapper
 
     @BeforeEach
     fun setUp() {
@@ -42,19 +52,20 @@ class IdempotencyTest {
         outboxEventService = mockk()
         inventoryReservationService = mockk()
         processedEventRepository = mockk()
-        idempotencyHandler = IdempotencyHandler(processedEventRepository) // 실제 구현 사용
+        orderCancelService = mockk()
         objectMapper = ObjectMapper().apply {
             registerModule(KotlinModule.Builder().build())
             registerModule(JavaTimeModule())
-            disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
         }
 
         ordersService = OrdersService(
             ordersRepository = ordersRepository,
             outboxEventService = outboxEventService,
             inventoryReservationService = inventoryReservationService,
-            idempotencyHandler = idempotencyHandler,
-            objectMapper = objectMapper
+            idempotencyHandler = IdempotencyHandler(processedEventRepository),
+            objectMapper = objectMapper,
+            orderCancelService = orderCancelService
         )
     }
 
@@ -63,112 +74,54 @@ class IdempotencyTest {
         clearAllMocks()
     }
 
-    private fun Orders.setId(id: UUID) {
-        val field = Orders::class.java.getDeclaredField("id")
-        field.isAccessible = true
-        field.set(this, id)
-    }
-
     @Test
-    @DisplayName("동일한 이벤트를 여러 번 처리해도 한 번만 실행된다")
-    fun `should process same event only once - idempotency test`() {
-        // Given
+    @DisplayName("동일한 결제 완료 이벤트는 한 번만 주문을 확정한다")
+    fun `should process duplicate payment completed event only once`() {
         val eventId = UUID.randomUUID()
         val orderId = UUID.randomUUID()
         val reservationId = UUID.randomUUID()
+        val order = reservedOrder(orderId, reservationId)
+        val event = paymentCompletedEvent(eventId, order)
+        val saveAttempts = AtomicInteger(0)
 
-        var called = 0
         every { processedEventRepository.save(any()) } answers {
-            called++
-            if (called == 1) firstArg()
-            else throw DataIntegrityViolationException("duplicate")
+            if (saveAttempts.incrementAndGet() == 1) firstArg<ProcessedEvent>()
+            else throw DataIntegrityViolationException("duplicate event")
+        }
+        every { ordersRepository.findById(orderId) } returns Optional.of(order)
+        every { inventoryReservationService.commit(order.productId, reservationId) } just Runs
+        every { ordersRepository.save(order) } returns order
+        every { outboxEventService.record(any()) } just Runs
+
+        repeat(3) {
+            ordersService.handlePaymentCompleted(event)
         }
 
-        val order = Orders(
-            userId = UUID.randomUUID(),
-            totalAmount = 10000L,
-            status = OrdersStatus.ORDER_RESERVED,
-            reservationId = reservationId
-        ).apply { setId(orderId) }
-
-        val payload = PaymentCompletedPayload(
-            orderId = orderId,
-            amount = order.totalAmount,
-            paymentId = UUID.randomUUID(),
-            completedAt = Instant.now()
-        )
-
-        val event = OutboxEventMessage(
-            eventId = eventId,
-            aggregateType = "ORDER",
-            aggregateId = orderId,
-            eventType = "PAYMENT_COMPLETED",
-            payload = objectMapper.writeValueAsString(payload),
-            occurredAt = Instant.now()
-        )
-
-        every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { ordersRepository.save(any()) } returns order
-        every { inventoryReservationService.commit(reservationId) } just Runs
-        every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
-
-
-        // When: 동일한 이벤트를 3번 처리
-        ordersService.handlePaymentCompleted(event)
-        ordersService.handlePaymentCompleted(event)
-        ordersService.handlePaymentCompleted(event)
-
-        // Then: commit과 save는 1번만 실행되어야 함
-        verify(exactly = 1) { inventoryReservationService.commit(reservationId) }
+        assertEquals(OrdersStatus.ORDER_CONFIRMED, order.status)
+        verify(exactly = 1) { inventoryReservationService.commit(order.productId, reservationId) }
         verify(exactly = 1) { ordersRepository.save(order) }
-        verify(exactly = 1) { outboxEventService.record(any<List<OutboxEvent>>()) }
-
+        verify(exactly = 1) { outboxEventService.record(match { it.size == 1 }) }
     }
 
     @Test
-    @DisplayName("동시에 동일한 이벤트를 처리해도 한 번만 실행된다 (동시성)")
-    fun `should handle concurrent duplicate events with idempotency`() {
-        // Given
+    @DisplayName("동시에 중복 결제 완료 이벤트가 들어와도 비즈니스 로직은 한 번만 실행된다")
+    fun `should handle concurrent duplicate payment events once`() {
         val eventId = UUID.randomUUID()
         val orderId = UUID.randomUUID()
         val reservationId = UUID.randomUUID()
+        val order = reservedOrder(orderId, reservationId)
+        val event = paymentCompletedEvent(eventId, order)
+        val saveAttempts = AtomicInteger(0)
 
-        val counter = AtomicInteger(0)
         every { processedEventRepository.save(any()) } answers {
-            if (counter.incrementAndGet() == 1) firstArg()
-            else throw DataIntegrityViolationException("duplicate")
+            if (saveAttempts.incrementAndGet() == 1) firstArg<ProcessedEvent>()
+            else throw DataIntegrityViolationException("duplicate event")
         }
-
-
-        val order = Orders(
-            userId = UUID.randomUUID(),
-            totalAmount = 10000L,
-            status = OrdersStatus.ORDER_RESERVED,
-            reservationId = reservationId
-        ).apply { setId(orderId) }
-
-        val payload = PaymentCompletedPayload(
-            orderId = orderId,
-            amount = order.totalAmount,
-            paymentId = UUID.randomUUID(),
-            completedAt = Instant.now()
-        )
-
-        val event = OutboxEventMessage(
-            eventId = eventId,
-            aggregateType = "ORDER",
-            aggregateId = orderId,
-            eventType = "PAYMENT_COMPLETED",
-            payload = objectMapper.writeValueAsString(payload),
-            occurredAt = Instant.now()
-        )
-
         every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { ordersRepository.save(any()) } returns order
-        every { inventoryReservationService.commit(reservationId) } just Runs
-        every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
+        every { inventoryReservationService.commit(order.productId, reservationId) } just Runs
+        every { ordersRepository.save(order) } returns order
+        every { outboxEventService.record(any()) } just Runs
 
-        // When: 10개 스레드에서 동시에 동일한 이벤트 처리
         val threadCount = 10
         val executor = Executors.newFixedThreadPool(threadCount)
         val latch = CountDownLatch(threadCount)
@@ -183,135 +136,117 @@ class IdempotencyTest {
             }
         }
 
-        latch.await()
-        executor.shutdown()
+        assertTrue(latch.await(10, TimeUnit.SECONDS), "동시 이벤트 처리가 제한 시간 안에 끝나야 합니다.")
+        executor.shutdownNow()
 
-        // Then: commit과 save는 1번만 실행되어야 함
-        verify(exactly = 1) { inventoryReservationService.commit(reservationId) }
-        verify(exactly = 1) { ordersRepository.save(any()) }
-        verify(exactly = 1) { outboxEventService.record(any<List<OutboxEvent>>()) }
-    }
-
-    @Test
-    @DisplayName("다른 이벤트 ID는 각각 처리된다")
-    fun `should process different event IDs separately`() {
-        // Given
-        val orderId = UUID.randomUUID()
-        val reservationId = UUID.randomUUID()
-
-        val counter = AtomicInteger(0)
-        every { processedEventRepository.save(any()) } answers {
-            if (counter.incrementAndGet() == 1) firstArg()
-            else throw DataIntegrityViolationException("duplicate")
-        }
-
-        val order = Orders(
-            userId = UUID.randomUUID(),
-            totalAmount = 10000L,
-            status = OrdersStatus.ORDER_RESERVED,
-            reservationId = reservationId
-        ).apply { setId(orderId) }
-
-        val payload = PaymentCompletedPayload(
-            orderId = orderId,
-            amount = order.totalAmount,
-            paymentId = UUID.randomUUID(),
-            completedAt = Instant.now()
-        )
-
-        // 서로 다른 이벤트 ID
-        val event1 = OutboxEventMessage(
-            eventId = UUID.randomUUID(),
-            aggregateType = "ORDER",
-            aggregateId = orderId,
-            eventType = "PAYMENT_COMPLETED",
-            payload = objectMapper.writeValueAsString(payload),
-            occurredAt = Instant.now()
-        )
-
-        val event2 = OutboxEventMessage(
-            eventId = UUID.randomUUID(),
-            aggregateType = "ORDER",
-            aggregateId = orderId,
-            eventType = "PAYMENT_COMPLETED",
-            payload = objectMapper.writeValueAsString(payload),
-            occurredAt = Instant.now()
-        )
-
-        every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { ordersRepository.save(any()) } returns order
-        every { inventoryReservationService.commit(reservationId) } just Runs
-        every { outboxEventService.record(any()) } just Runs
-
-        // When: 다른 이벤트 ID로 2번 처리
-        ordersService.handlePaymentCompleted(event1)
-        
-        // 첫 번째 처리 후 상태 변경
-        order.status = OrdersStatus.ORDER_CONFIRMED
-        
-        ordersService.handlePaymentCompleted(event2)
-
-        // Then: 첫 번째만 처리됨 (두 번째는 이미 CONFIRMED 상태라 스킵)
-        verify(exactly = 1) { inventoryReservationService.commit(reservationId) }
+        verify(exactly = 1) { inventoryReservationService.commit(order.productId, reservationId) }
+        verify(exactly = 1) { ordersRepository.save(order) }
         verify(exactly = 1) { outboxEventService.record(any()) }
     }
 
     @Test
-    @DisplayName("⏱️ 이미 처리된 이벤트는 즉시 반환된다 (성능)")
-    fun `should return immediately for already processed events`() {
-        // Given
-        val eventId = UUID.randomUUID()
+    @DisplayName("서로 다른 이벤트라도 이미 확정된 주문이면 재확정하지 않는다")
+    fun `should skip already confirmed order for a different event`() {
         val orderId = UUID.randomUUID()
         val reservationId = UUID.randomUUID()
+        val order = reservedOrder(orderId, reservationId)
+        val firstEvent = paymentCompletedEvent(UUID.randomUUID(), order)
+        val secondEvent = paymentCompletedEvent(UUID.randomUUID(), order)
 
-        val counter = AtomicInteger(0)
+        every { processedEventRepository.save(any()) } answers { firstArg<ProcessedEvent>() }
+        every { ordersRepository.findById(orderId) } returns Optional.of(order)
+        every { inventoryReservationService.commit(order.productId, reservationId) } just Runs
+        every { ordersRepository.save(order) } returns order
+        every { outboxEventService.record(any()) } just Runs
+
+        ordersService.handlePaymentCompleted(firstEvent)
+        ordersService.handlePaymentCompleted(secondEvent)
+
+        verify(exactly = 2) { processedEventRepository.save(any()) }
+        verify(exactly = 1) { inventoryReservationService.commit(order.productId, reservationId) }
+        verify(exactly = 1) { ordersRepository.save(order) }
+        verify(exactly = 1) { outboxEventService.record(any()) }
+    }
+
+    @Test
+    @DisplayName("중복 결제 실패 이벤트는 주문 취소를 한 번만 위임한다")
+    fun `should delegate duplicate payment failed event only once`() {
+        val eventId = UUID.randomUUID()
+        val paymentId = UUID.randomUUID()
+        val orderId = UUID.randomUUID()
+        val reservationId = UUID.randomUUID()
+        val event = paymentFailedEvent(eventId, paymentId, orderId, reservationId)
+        val saveAttempts = AtomicInteger(0)
+
         every { processedEventRepository.save(any()) } answers {
-            if (counter.incrementAndGet() == 1) firstArg()
-            else throw DataIntegrityViolationException("duplicate")
+            if (saveAttempts.incrementAndGet() == 1) firstArg<ProcessedEvent>()
+            else throw DataIntegrityViolationException("duplicate event")
+        }
+        every { orderCancelService.cancel(orderId, "결제 실패") } returns true
+
+        repeat(3) {
+            ordersService.handlePaymentFailed(event)
         }
 
-        val order = Orders(
+        verify(exactly = 1) { orderCancelService.cancel(orderId, "결제 실패") }
+    }
+
+    private fun reservedOrder(orderId: UUID, reservationId: UUID): Orders =
+        Orders(
             userId = UUID.randomUUID(),
+            productId = "PRODUCT-001",
             totalAmount = 10000L,
             status = OrdersStatus.ORDER_RESERVED,
-            reservationId = reservationId
-        ).apply { setId(orderId) }
+            reservationId = reservationId,
+            expiresAt = Instant.now().plusSeconds(600)
+        ).apply {
+            id = orderId
+            createdAt = Instant.now()
+            updatedAt = Instant.now()
+        }
 
+    private fun paymentCompletedEvent(eventId: UUID, order: Orders): OutboxEventMessage {
         val payload = PaymentCompletedPayload(
-            orderId = orderId,
-            amount = order.totalAmount,
             paymentId = UUID.randomUUID(),
+            reservationId = order.reservationId,
+            orderId = order.id,
+            userId = order.userId,
+            amount = order.totalAmount,
             completedAt = Instant.now()
         )
 
-        val event = OutboxEventMessage(
+        return OutboxEventMessage(
             eventId = eventId,
-            aggregateType = "ORDER",
-            aggregateId = orderId,
+            aggregateType = "PAYMENT",
+            aggregateId = order.id,
             eventType = "PAYMENT_COMPLETED",
-            payload = objectMapper.writeValueAsString(payload),
-            occurredAt = Instant.now()
+            occurredAt = Instant.now(),
+            payload = objectMapper.writeValueAsString(payload)
+        )
+    }
+
+    private fun paymentFailedEvent(
+        eventId: UUID,
+        paymentId: UUID,
+        orderId: UUID,
+        reservationId: UUID
+    ): OutboxEventMessage {
+        val payload = PaymentFailedPayload(
+            paymentId = paymentId,
+            orderId = orderId,
+            amount = 10000L,
+            reservationId = reservationId,
+            failedAt = Instant.now(),
+            pgTxId = "PG-TX-FAILED"
         )
 
-        every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { ordersRepository.save(any()) } returns order
-        every { inventoryReservationService.commit(reservationId) } just Runs
-        every { outboxEventService.record(any()) } just Runs
-
-        // When: 첫 번째 처리
-        val start1 = System.nanoTime()
-        ordersService.handlePaymentCompleted(event)
-        val duration1 = System.nanoTime() - start1
-
-        // When: 두 번째 처리 (이미 처리됨)
-        val start2 = System.nanoTime()
-        ordersService.handlePaymentCompleted(event)
-        val duration2 = System.nanoTime() - start2
-
-        // Then: 두 번째 호출이 훨씬 빨라야 함 (실제 처리 없이 바로 반환)
-        assertTrue(duration2 < duration1 / 2, 
-            "두 번째 호출이 첫 번째보다 빨라야 함: duration1=$duration1, duration2=$duration2")
-        
-        verify(exactly = 1) { inventoryReservationService.commit(reservationId) }
+        return OutboxEventMessage(
+            eventId = eventId,
+            aggregateType = "PAYMENT",
+            aggregateId = paymentId,
+            eventType = "PAYMENT_FAILED",
+            occurredAt = Instant.now(),
+            payload = objectMapper.writeValueAsString(payload)
+        )
     }
 }

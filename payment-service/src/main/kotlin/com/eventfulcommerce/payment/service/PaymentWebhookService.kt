@@ -42,6 +42,7 @@ class PaymentWebhookService(
         val paymentPayload = PaymentCompletedPayload(
             paymentId = payment.id,
             orderId = payment.orderId,
+            userId = payment.userId,
             amount = payment.amount,
             reservationId = payment.reservationId,
             completedAt = Instant.now()

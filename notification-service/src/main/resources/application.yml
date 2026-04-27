@@ -1,0 +1,60 @@
+server:
+  port: 8084
+
+spring:
+  profiles:
+    default: dev
+  application:
+    name: notification-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/notification_service
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      group-id: notification-service-group
+      auto-offset-reset: latest
+
+telegram:
+  bot:
+    token: ${TELEGRAM_BOT_TOKEN:your-bot-token-here}
+    username: ${TELEGRAM_BOT_USERNAME:eventful_commerce_bot}
+  default-user:
+    user-id: ${TELEGRAM_DEFAULT_USER_ID:}
+    chat-id: ${TELEGRAM_DEFAULT_CHAT_ID:}
+
+notification:
+  kafka:
+    topics:
+      order-events: order-events
+      payment-events: payment-events
+      shipping-events: shipping-events
+
+outbox:
+  topic: notification-events
+  polling-ms: 200
+
+---
+# Docker 프로필
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:postgresql://postgres:5432/notification_service
+  kafka:
+    bootstrap-servers: kafka:9092

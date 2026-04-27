@@ -1,8 +1,7 @@
 package com.eventfulcommerce.shipping.domain
 
 enum class ShippingStatus {
-    SHIPPING,
-    SHIPPING_READY,
-    SHIPPING_SHIPPED,
-    SHIPPING_DELIVERED
+    PREPARING,    // 배송 준비 중
+    STARTED,      // 배송 시작
+    COMPLETED     // 배송 완료
 }

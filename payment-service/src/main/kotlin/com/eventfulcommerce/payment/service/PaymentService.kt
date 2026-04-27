@@ -36,6 +36,7 @@ class PaymentService(
 
             val payment = Payment(
                 orderId = payload.orderId,
+                userId = payload.userId,
                 status = PaymentStatus.PAYMENT_RESERVED,
                 amount = payload.totalAmount,
                 reservationId = payload.reservationId,
