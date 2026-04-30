@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: user-service
+  profiles:
+    active: local
+
+server:
+  port: 8085
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:postgresql://localhost:5432/user_service_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: localhost
+      port: 7001
+      cluster:
+        nodes:
+          - localhost:7001
+          - localhost:7002
+          - localhost:7003
+          - localhost:7004
+          - localhost:7005
+          - localhost:7006
+
+jwt:
+  secret: ${JWT_SECRET:your-super-secret-jwt-key-that-must-be-at-least-256-bits-long-for-hs256-algorithm}
+  access-token-validity: 3600000  # 1시간 (ms)
+  refresh-token-validity: 604800000  # 7일 (ms)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always

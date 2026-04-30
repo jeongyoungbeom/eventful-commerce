@@ -8,5 +8,6 @@ include(
 //    "inventory-service",
     "shipping-service",
     "notification-service",
+    "user-service",
 //    "integration-tests",
 )

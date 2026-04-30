@@ -14,6 +14,9 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'shipping_service')\ge
 SELECT 'CREATE DATABASE notification_service'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'notification_service')\gexec
 
+SELECT 'CREATE DATABASE user_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'user_service')\gexec
+
 -- Grant privileges (these are idempotent - safe to run multiple times)
 \c order_service
 GRANT ALL PRIVILEGES ON DATABASE order_service TO postgres;
@@ -29,4 +32,8 @@ GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
 
 \c notification_service
 GRANT ALL PRIVILEGES ON DATABASE notification_service TO postgres;
+GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
+
+\c user_service
+GRANT ALL PRIVILEGES ON DATABASE user_service TO postgres;
 GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
