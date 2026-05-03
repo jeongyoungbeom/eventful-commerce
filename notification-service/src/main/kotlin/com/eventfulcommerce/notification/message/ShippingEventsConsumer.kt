@@ -33,6 +33,7 @@ class ShippingEventsConsumer(
             }
         } catch (e: Exception) {
             logger.error(e) { "❌ Shipping 이벤트 처리 실패: $value" }
+            throw e
         }
     }
 

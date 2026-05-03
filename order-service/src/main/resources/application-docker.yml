@@ -25,6 +25,11 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      group-id: order-service-group
+      auto-offset-reset: earliest
 
   # Redis Cluster - 컨테이너 이름 사용
   data:
@@ -47,3 +52,6 @@ spring:
 outbox:
   topic: order-events
   polling-ms: 200
+
+jwt:
+  secret: ${JWT_SECRET}

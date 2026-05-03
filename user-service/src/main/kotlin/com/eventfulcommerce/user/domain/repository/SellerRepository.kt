@@ -7,8 +7,10 @@ import java.util.UUID
 
 @Repository
 interface SellerRepository : JpaRepository<Seller, UUID> {
-    
-    fun findByUserId(userId: UUID): Seller?
-    
+
+    fun findByEmail(email: String): Seller?
+
+    fun existsByEmail(email: String): Boolean
+
     fun existsByBusinessNumber(businessNumber: String): Boolean
 }

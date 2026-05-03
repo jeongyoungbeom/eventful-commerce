@@ -1,58 +1,84 @@
 #!/bin/bash
 
-# Docker Hub username
 DOCKER_USERNAME="jybeomss1"
 
-echo "🐳 Pulling images from Docker Hub and starting services"
+echo "🐳 Eventful Commerce - Production Deployment"
 echo "=========================================="
+echo ""
+
+# Check if .env file exists
+if [ ! -f .env ]; then
+    echo "📝 .env file not found. Creating with auto-generated secrets..."
+    
+    # Generate JWT secret
+    if command -v openssl &> /dev/null; then
+        JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+        
+        # Create .env file
+        cat > .env << EOF
+# Auto-generated environment variables
+# Generated at: $(date)
+
+# JWT Secret (Auto-generated)
+JWT_SECRET=${JWT_SECRET}
+
+# Telegram Notification (Optional - configure via API)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+TELEGRAM_DEFAULT_USER_ID=
+TELEGRAM_DEFAULT_CHAT_ID=
+EOF
+        
+        echo "✅ .env file created with secure JWT secret"
+        echo ""
+    else
+        echo "❌ Error: openssl not found!"
+        echo "Please install openssl: sudo apt-get install openssl"
+        exit 1
+    fi
+else
+    # Check if JWT_SECRET exists in .env
+    if ! grep -q "JWT_SECRET=" .env || ! grep -q "JWT_SECRET=.\+" .env; then
+        echo "⚠️  JWT_SECRET not found in .env file"
+        echo "📝 Generating and adding JWT_SECRET..."
+        
+        if command -v openssl &> /dev/null; then
+            JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+            
+            # Add or update JWT_SECRET in .env
+            if grep -q "JWT_SECRET=" .env; then
+                sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" .env
+            else
+                echo "" >> .env
+                echo "# Auto-generated JWT Secret" >> .env
+                echo "JWT_SECRET=${JWT_SECRET}" >> .env
+            fi
+            
+            echo "✅ JWT_SECRET added to .env file"
+            echo ""
+        else
+            echo "❌ Error: openssl not found!"
+            exit 1
+        fi
+    else
+        echo "✅ .env file found with JWT_SECRET"
+        echo ""
+    fi
+fi
+
+# Pull latest images
+echo "📥 Pulling latest images from Docker Hub..."
 echo "Username: ${DOCKER_USERNAME}"
 echo ""
 
-prompt_with_default() {
-    local prompt="$1"
-    local default_value="$2"
-    local input
-
-    if [ -n "$default_value" ]; then
-        read -r -p "${prompt} [${default_value}]: " input
-        echo "${input:-$default_value}"
-    else
-        read -r -p "${prompt}: " input
-        echo "$input"
-    fi
-}
-
-echo "📨 Telegram notification settings"
-echo "Leave blank if you do not want Telegram notifications."
-echo ""
-
-TELEGRAM_BOT_TOKEN=$(prompt_with_default "Telegram bot token" "${TELEGRAM_BOT_TOKEN:-}")
-TELEGRAM_BOT_USERNAME=$(prompt_with_default "Telegram bot username" "${TELEGRAM_BOT_USERNAME:-eventful_commerce_bot}")
-TELEGRAM_DEFAULT_USER_ID=$(prompt_with_default "Default userId to receive notifications" "${TELEGRAM_DEFAULT_USER_ID:-297a520a-f08d-4ca9-8ec9-5bfe21c0575a}")
-TELEGRAM_DEFAULT_CHAT_ID=$(prompt_with_default "Telegram chatId for that userId" "${TELEGRAM_DEFAULT_CHAT_ID:-}")
-
-export TELEGRAM_BOT_TOKEN
-export TELEGRAM_BOT_USERNAME
-export TELEGRAM_DEFAULT_USER_ID
-export TELEGRAM_DEFAULT_CHAT_ID
-
-echo ""
-
-# Pull latest images
-echo "📥 Pulling latest images..."
-echo ""
-
-echo "⬇️  Pulling order-service..."
+docker pull ${DOCKER_USERNAME}/api-gateway:latest
 docker pull ${DOCKER_USERNAME}/order-service:latest
-
-echo "⬇️  Pulling payment-service..."
 docker pull ${DOCKER_USERNAME}/payment-service:latest
-
-echo "⬇️  Pulling shipping-service..."
 docker pull ${DOCKER_USERNAME}/shipping-service:latest
-
-echo "⬇️  Pulling notification-service..."
 docker pull ${DOCKER_USERNAME}/notification-service:latest
+docker pull ${DOCKER_USERNAME}/user-service:latest
+docker pull ${DOCKER_USERNAME}/product-service:latest
+docker pull ${DOCKER_USERNAME}/settlement-service:latest
 
 echo ""
 echo "✅ All images pulled successfully!"
@@ -76,17 +102,26 @@ echo "🔧 Initializing Redis Cluster..."
 
 echo ""
 echo "=========================================="
-echo "✅ All services started!"
+echo "✅ All services started successfully!"
 echo ""
 echo "📊 Service URLs:"
-echo "  - Order Service:    http://localhost:8081"
-echo "  - Payment Service:  http://localhost:8082"
-echo "  - Shipping Service: http://localhost:8083"
-echo "  - Notification:     http://localhost:8084"
+echo "  - Order Service:      http://localhost:8081"
+echo "  - Payment Service:    http://localhost:8082"
+echo "  - Shipping Service:   http://localhost:8083"
+echo "  - Notification:       http://localhost:8084"
+echo "  - User Service:       http://localhost:8085"
+echo "  - Product Service:    http://localhost:8086"
+echo "  - Settlement Service: http://localhost:8087"
 echo "  - PostgreSQL:       localhost:5432"
 echo "  - Redis Cluster:    localhost:7001-7006"
 echo "  - Kafka:            localhost:9092"
 echo ""
-echo "📝 Check status: docker-compose ps"
-echo "📋 View logs:    docker-compose logs -f [service-name]"
+echo "📝 Useful Commands:"
+echo "  - Check status: docker-compose ps"
+echo "  - View logs:    docker-compose logs -f [service-name]"
+echo "  - Stop all:     docker-compose down"
+echo ""
+echo "🔐 Security Note:"
+echo "  - JWT secret auto-generated and saved in .env"
+echo "  - Configure Telegram via API: POST /telegram/register"
 echo ""

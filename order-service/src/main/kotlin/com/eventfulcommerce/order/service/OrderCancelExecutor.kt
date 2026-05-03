@@ -50,7 +50,7 @@ class OrderCancelExecutor(
         val reservationId = order.reservationId
         if (reservationId != null) {
             logger.info { "재고 해제: orderId=$orderId, reservationId=$reservationId" }
-            inventoryReservationService.release(order.productId, reservationId)
+            inventoryReservationService.release(order.productId.toString(), reservationId)
         } else {
             logger.warn { "예약 ID가 없습니다: orderId=$orderId" }
         }

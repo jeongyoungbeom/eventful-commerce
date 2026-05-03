@@ -1,5 +1,6 @@
 package com.eventfulcommerce.order.controller
 
+import com.eventfulcommerce.common.auth.SecurityContextUtil
 import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.service.OrdersService
 import org.springframework.http.HttpStatus
@@ -14,18 +15,15 @@ class OrderController(
 
     @PostMapping("/orders")
     fun orders(@RequestBody ordersRequests: List<OrdersRequest>): ResponseEntity<List<String>> {
-        return ResponseEntity(ordersService.orders(ordersRequests), HttpStatus.OK)
+        val userId = SecurityContextUtil.getCurrentUserId()
+        return ResponseEntity(ordersService.orders(ordersRequests, userId), HttpStatus.OK)
     }
 
-    /**
-     * 사용자 수동 취소
-     * 
-     * POST /orders/{orderId}/cancel
-     */
     @PostMapping("/orders/{orderId}/cancel")
     fun cancelOrder(@PathVariable orderId: UUID): ResponseEntity<Map<String, Any>> {
-        val success = ordersService.cancelOrder(orderId)
-        
+        val userId = SecurityContextUtil.getCurrentUserId()
+        val success = ordersService.cancelOrder(orderId, userId)
+
         return if (success) {
             ResponseEntity.ok(mapOf(
                 "success" to true,

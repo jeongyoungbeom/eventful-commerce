@@ -14,51 +14,32 @@ private val logger = KotlinLogging.logger {}
 class SellerService(
     private val sellerRepository: SellerRepository
 ) {
-    
-    /**
-     * Seller 조회 (ID로)
-     */
-    fun findById(sellerId: UUID): Seller? {
-        return sellerRepository.findById(sellerId).orElse(null)
-    }
-    
-    /**
-     * Seller 조회 (userId로)
-     */
-    fun findByUserId(userId: UUID): Seller? {
-        return sellerRepository.findByUserId(userId)
-    }
-    
-    /**
-     * 사업자 등록번호 중복 확인
-     */
-    fun existsByBusinessNumber(businessNumber: String): Boolean {
-        return sellerRepository.existsByBusinessNumber(businessNumber)
-    }
-    
-    /**
-     * 사업자 등록번호 중복 체크 후 예외 발생
-     */
+
+    fun findById(sellerId: UUID): Seller? =
+        sellerRepository.findById(sellerId).orElse(null)
+
+    fun findByEmail(email: String): Seller? =
+        sellerRepository.findByEmail(email)
+
+    fun existsByEmail(email: String): Boolean =
+        sellerRepository.existsByEmail(email)
+
+    fun existsByBusinessNumber(businessNumber: String): Boolean =
+        sellerRepository.existsByBusinessNumber(businessNumber)
+
     fun validateBusinessNumber(businessNumber: String) {
         if (existsByBusinessNumber(businessNumber)) {
             throw DuplicateBusinessNumberException(businessNumber)
         }
     }
-    
-    /**
-     * Seller 저장
-     */
+
     @Transactional
-    fun save(seller: Seller): Seller {
-        return sellerRepository.save(seller)
-    }
-    
-    /**
-     * Seller 삭제
-     */
+    fun save(seller: Seller): Seller =
+        sellerRepository.save(seller)
+
     @Transactional
     fun delete(sellerId: UUID) {
         sellerRepository.deleteById(sellerId)
-        logger.info { "🗑️ Seller 삭제: sellerId=$sellerId" }
+        logger.info { "Seller 삭제: sellerId=$sellerId" }
     }
 }

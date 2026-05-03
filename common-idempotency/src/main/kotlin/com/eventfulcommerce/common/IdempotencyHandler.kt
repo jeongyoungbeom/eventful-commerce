@@ -13,22 +13,20 @@ class IdempotencyHandler(
     private val processedEventRepository: ProcessedEventRepository
 ) {
     fun <T> executeIdempotent(eventId: UUID, action: () -> T): IdempotencyResult<T> {
-        return try {
-            // 멱등성 체크: 이미 처리된 이벤트인지 확인
+        // save()의 DataIntegrityViolationException만 "중복 이벤트"로 판단
+        try {
             processedEventRepository.save(ProcessedEvent(eventId))
-            
-            // 처음 처리하는 이벤트이므로 비즈니스 로직 실행
+        } catch (e: DataIntegrityViolationException) {
+            logger.debug("이미 처리된 이벤트: eventId={}", eventId)
+            return IdempotencyResult.AlreadyProcessed
+        }
+
+        // action()의 예외는 그대로 전파 — 호출자(Kafka consumer)가 처리
+        return try {
             val result = action()
             logger.debug("이벤트 처리 완료: eventId={}", eventId)
             IdempotencyResult.Success(result)
-            
-        } catch (e: DataIntegrityViolationException) {
-            // 중복 키 제약 위반 = 이미 처리된 이벤트
-            logger.debug("이미 처리된 이벤트: eventId={}", eventId)
-            IdempotencyResult.AlreadyProcessed
-            
         } catch (e: Exception) {
-            // 기타 예외는 상위로 전파
             logger.error("이벤트 처리 중 오류 발생: eventId={}", eventId, e)
             throw e
         }

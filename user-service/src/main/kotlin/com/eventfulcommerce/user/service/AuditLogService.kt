@@ -11,6 +11,7 @@ import java.util.UUID
 private val logger = KotlinLogging.logger {}
 
 @Service
+@Transactional
 class AuditLogService(
     private val auditLogRepository: AuditLogRepository
 ) {
@@ -18,7 +19,7 @@ class AuditLogService(
     /**
      * 감사 로그 기록
      */
-    @Transactional
+
     fun log(
         userId: UUID?,
         action: String,

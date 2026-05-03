@@ -13,7 +13,13 @@ class Orders(
     val userId: UUID,
 
     @Column(nullable = false)
-    val productId: String,
+    val productId: UUID,
+
+    @Column(nullable = false)
+    val sellerId: UUID,
+
+    @Column(nullable = false)
+    val quantity: Int,
 
     @Column(nullable = false)
     val totalAmount: Long,

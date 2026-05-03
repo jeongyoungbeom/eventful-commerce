@@ -50,7 +50,7 @@ class OutboxPublisher(
                 occurredAt = event.createdAt,
                 payload = event.payload
             )
-            logger.info { "퍼블리싱 -> " + event.payload}
+            logger.debug { "이벤트 발행: eventType=${event.eventType}, aggregateId=${event.aggregateId}" }
             val valueAsString = objectMapper.writeValueAsString(outboxEventMessage)
 
             kafkaTemplate.send(topic, event.aggregateId.toString(), valueAsString)
@@ -58,6 +58,8 @@ class OutboxPublisher(
                     try {
                         if (ex == null) outboxEventService.markAsSent(event.id)
                         else outboxEventService.markAsFailed(event.id, ex, maxRetries)
+                    } catch (e: Exception) {
+                        logger.error { "이벤트 상태 업데이트 실패: eventId=${event.id}, ${e.message}" }
                     } finally {
                         inFlight.decrementAndGet()
                     }

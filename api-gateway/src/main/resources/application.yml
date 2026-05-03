@@ -1,0 +1,80 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  data:
+    redis:
+      cluster:
+        nodes:
+          - localhost:7001
+          - localhost:7002
+          - localhost:7003
+          - localhost:7004
+          - localhost:7005
+          - localhost:7006
+        max-redirects: 3
+
+  cloud:
+    gateway:
+      mvc:
+        routes:
+          - id: order-service
+            uri: http://localhost:8081
+            predicates:
+              - Path=/api/orders/**
+            filters:
+              - StripPrefix=1
+
+          - id: payment-service
+            uri: http://localhost:8082
+            predicates:
+              - Path=/api/payments/**
+            filters:
+              - StripPrefix=1
+
+          - id: notification-service
+            uri: http://localhost:8084
+            predicates:
+              - Path=/api/telegram/**
+            filters:
+              - StripPrefix=1
+
+          - id: user-service-auth
+            uri: http://localhost:8085
+            predicates:
+              - Path=/api/auth/**
+            filters:
+              - StripPrefix=1
+
+          - id: user-service-users
+            uri: http://localhost:8085
+            predicates:
+              - Path=/api/users/**
+            filters:
+              - StripPrefix=1
+
+          - id: product-service
+            uri: http://localhost:8086
+            predicates:
+              - Path=/api/products/**
+            filters:
+              - StripPrefix=1
+
+          - id: settlement-service
+            uri: http://localhost:8087
+            predicates:
+              - Path=/api/settlements/**
+            filters:
+              - StripPrefix=1
+
+jwt:
+  secret: ${JWT_SECRET:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

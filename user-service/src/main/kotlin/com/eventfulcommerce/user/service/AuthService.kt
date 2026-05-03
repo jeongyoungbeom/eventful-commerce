@@ -1,8 +1,9 @@
 package com.eventfulcommerce.user.service
 
+import com.eventfulcommerce.common.auth.JwtTokenProvider
+import com.eventfulcommerce.common.auth.UserRole
 import com.eventfulcommerce.user.domain.entity.Seller
 import com.eventfulcommerce.user.domain.entity.User
-import com.eventfulcommerce.user.domain.entity.UserRole
 import com.eventfulcommerce.user.dto.*
 import com.eventfulcommerce.user.exception.DuplicateEmailException
 import com.eventfulcommerce.user.exception.InvalidCredentialsException
@@ -27,253 +28,177 @@ class AuthService(
     private val accountLockService: AccountLockService,
     private val passwordEncoder: PasswordEncoder
 ) {
-    
-    /**
-     * 일반 사용자 회원가입
-     */
+
     @Transactional
     fun signupUser(request: SignupRequest, httpRequest: HttpServletRequest?): SignupResponse {
-        // 이메일 중복 체크
         if (userService.existsByEmail(request.email)) {
             throw DuplicateEmailException(request.email)
         }
-        
-        // User 생성
+
         val user = User(
             email = request.email,
             password = passwordEncoder.encode(request.password),
-            name = request.name,
-            role = UserRole.USER
+            name = request.name
         )
-        
         val savedUser = userService.save(user)
-        
-        // 감사 로그
         auditLogService.logSignup(savedUser.id, httpRequest)
-        
-        logger.info { "✅ 일반 사용자 회원가입: userId=${savedUser.id}, email=${savedUser.email}" }
-        
-        return SignupResponse(
-            userId = savedUser.id,
-            email = savedUser.email,
-            name = savedUser.name,
-            role = savedUser.role
-        )
+        logger.info { "일반 사용자 회원가입: userId=${savedUser.id}" }
+
+        return SignupResponse(userId = savedUser.id, email = savedUser.email, name = savedUser.name)
     }
-    
-    /**
-     * 판매자 회원가입
-     */
+
     @Transactional
     fun signupSeller(request: SellerSignupRequest, httpRequest: HttpServletRequest?): SellerSignupResponse {
-        // 이메일 중복 체크
-        if (userService.existsByEmail(request.email)) {
+        if (sellerService.existsByEmail(request.email)) {
             throw DuplicateEmailException(request.email)
         }
-        
-        // 사업자 등록번호 중복 체크
         sellerService.validateBusinessNumber(request.businessNumber)
-        
-        // User 생성 (SELLER 권한)
-        val user = User(
+
+        val seller = Seller(
             email = request.email,
             password = passwordEncoder.encode(request.password),
             name = request.name,
-            role = UserRole.SELLER
-        )
-        
-        val savedUser = userService.save(user)
-        
-        // Seller 정보 생성
-        val seller = Seller(
-            userId = savedUser.id,
             businessName = request.businessName,
             businessNumber = request.businessNumber,
             bankAccount = request.bankAccount,
             bankCode = request.bankCode
         )
-        
         val savedSeller = sellerService.save(seller)
-        
-        // 감사 로그
-        auditLogService.logSignup(savedUser.id, httpRequest)
-        
-        logger.info {
-            "✅ 판매자 회원가입: userId=${savedUser.id}, sellerId=${savedSeller.id}, " +
-            "email=${savedUser.email}, businessNumber=${savedSeller.businessNumber}"
-        }
-        
+        auditLogService.logSignup(savedSeller.id, httpRequest)
+        logger.info { "판매자 회원가입: sellerId=${savedSeller.id}" }
+
         return SellerSignupResponse(
-            userId = savedUser.id,
             sellerId = savedSeller.id,
-            email = savedUser.email,
-            name = savedUser.name,
+            email = savedSeller.email,
+            name = savedSeller.name,
             businessName = savedSeller.businessName
         )
     }
-    
-    /**
-     * 로그인
-     */
+
     @Transactional
-    fun login(request: LoginRequest, httpRequest: HttpServletRequest?): TokenResponse {
-        val ipAddress = httpRequest?.let { getClientIP(it) } ?: "unknown"
-        
-        // 1. IP 기반 로그인 차단 확인
-        if (loginAttemptService.isBlocked(ipAddress)) {
-            val remainingTime = loginAttemptService.getRemainingLockTime(ipAddress)
-            auditLogService.logLoginFailure(request.email, "IP 차단 (${remainingTime}초 남음)", httpRequest)
-            throw InvalidCredentialsException()
+    fun loginUser(request: LoginRequest, httpRequest: HttpServletRequest?): TokenResponse {
+        val ipAddress = getClientIP(httpRequest)
+
+        checkIpAndEmailBlock(request.email, ipAddress, httpRequest)
+
+        val user = userService.findByEmail(request.email) ?: run {
+            recordFailureAndThrow(ipAddress, request.email, "사용자 없음", httpRequest)
         }
-        
-        // 2. 이메일 기반 로그인 차단 확인
-        if (loginAttemptService.isBlockedByEmail(request.email)) {
-            auditLogService.logLoginFailure(request.email, "이메일 차단", httpRequest)
-            throw InvalidCredentialsException()
-        }
-        
-        // 3. User 조회
-        val user = userService.findByEmail(request.email)
-        
-        if (user == null) {
-            // 로그인 실패 기록
-            loginAttemptService.recordFailure(ipAddress)
-            loginAttemptService.recordFailureByEmail(request.email)
-            auditLogService.logLoginFailure(request.email, "사용자 없음", httpRequest)
-            throw InvalidCredentialsException()
-        }
-        
-        // 4. 계정 잠금 확인
+
         accountLockService.checkAndThrowIfLocked(user)
-        
-        // 5. 비밀번호 검증
+
         if (!passwordEncoder.matches(request.password, user.password)) {
-            // 로그인 실패 기록
-            loginAttemptService.recordFailure(ipAddress)
-            loginAttemptService.recordFailureByEmail(request.email)
-            
-            // 5회 실패 시 계정 잠금
-            val emailAttempts = loginAttemptService.getAttemptsByEmail(request.email)
-            if (emailAttempts >= 5) {
-                accountLockService.lockAccount(user.id)
-                auditLogService.logLoginFailure(request.email, "5회 실패로 계정 잠금", httpRequest)
-            } else {
-                auditLogService.logLoginFailure(request.email, "비밀번호 불일치 (${emailAttempts}회)", httpRequest)
-            }
-            
-            throw InvalidCredentialsException()
+            recordFailureWithLockCheck(user, ipAddress, request.email, httpRequest)
         }
-        
-        // 6. 로그인 성공 - 실패 기록 초기화
+
         loginAttemptService.resetAttempts(ipAddress, request.email)
-        
-        // 7. Access Token & Refresh Token 생성
-        val accessToken = jwtTokenProvider.createAccessToken(user.id, user.role)
-        val refreshToken = jwtTokenProvider.createRefreshToken(user.id)
-        
-        // 8. Refresh Token을 Redis에 저장
-        refreshTokenService.saveRefreshToken(user.id, refreshToken)
-        
-        // 9. 감사 로그
+        val accessToken = jwtTokenProvider.createAccessToken(user.id, UserRole.USER)
+        val refreshToken = jwtTokenProvider.createRefreshToken(user.id, UserRole.USER)
+        refreshTokenService.saveRefreshToken(user.id, refreshToken, UserRole.USER)
         auditLogService.logLoginSuccess(user.id, httpRequest)
-        
-        logger.info { "✅ 로그인 성공: userId=${user.id}, email=${user.email}" }
-        
-        return TokenResponse(
-            accessToken = accessToken,
-            refreshToken = refreshToken,
-            userId = user.id,
-            role = user.role
-        )
+        logger.info { "사용자 로그인 성공: userId=${user.id}" }
+
+        return TokenResponse(accessToken = accessToken, refreshToken = refreshToken, userId = user.id, role = UserRole.USER)
     }
-    
-    /**
-     * 클라이언트 IP 추출 (AuditLogService와 동일)
-     */
-    private fun getClientIP(request: HttpServletRequest): String {
-        val headers = listOf(
-            "X-Forwarded-For",
-            "Proxy-Client-IP",
-            "WL-Proxy-Client-IP",
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_FORWARDED",
-            "HTTP_X_CLUSTER_CLIENT_IP",
-            "HTTP_CLIENT_IP",
-            "HTTP_FORWARDED_FOR",
-            "HTTP_FORWARDED",
-            "HTTP_VIA",
-            "REMOTE_ADDR"
-        )
-        
-        for (header in headers) {
-            val ip = request.getHeader(header)
-            if (!ip.isNullOrBlank() && ip != "unknown") {
-                return ip.split(",")[0].trim()
-            }
+
+    @Transactional
+    fun loginSeller(request: LoginRequest, httpRequest: HttpServletRequest?): TokenResponse {
+        val ipAddress = getClientIP(httpRequest)
+
+        checkIpAndEmailBlock(request.email, ipAddress, httpRequest)
+
+        val seller = sellerService.findByEmail(request.email) ?: run {
+            recordFailureAndThrow(ipAddress, request.email, "판매자 없음", httpRequest)
         }
-        
-        return request.remoteAddr ?: "unknown"
+
+        accountLockService.checkAndThrowIfLocked(seller)
+
+        if (!passwordEncoder.matches(request.password, seller.password)) {
+            recordFailureWithLockCheck(seller, ipAddress, request.email, httpRequest)
+        }
+
+        loginAttemptService.resetAttempts(ipAddress, request.email)
+        val accessToken = jwtTokenProvider.createAccessToken(seller.id, UserRole.SELLER)
+        val refreshToken = jwtTokenProvider.createRefreshToken(seller.id, UserRole.SELLER)
+        refreshTokenService.saveRefreshToken(seller.id, refreshToken, UserRole.SELLER)
+        auditLogService.logLoginSuccess(seller.id, httpRequest)
+        logger.info { "판매자 로그인 성공: sellerId=${seller.id}" }
+
+        return TokenResponse(accessToken = accessToken, refreshToken = refreshToken, userId = seller.id, role = UserRole.SELLER)
     }
-    
-    /**
-     * Access Token 재발급
-     */
+
     @Transactional(readOnly = true)
     fun refreshAccessToken(request: RefreshRequest): TokenResponse {
         val refreshToken = request.refreshToken
-        
-        // Refresh Token 검증
-        if (!jwtTokenProvider.validateToken(refreshToken)) {
-            throw InvalidTokenException("유효하지 않은 Refresh Token입니다")
-        }
-        
-        // 토큰 타입 확인
-        val tokenType = jwtTokenProvider.getTokenType(refreshToken)
-        if (tokenType != "refresh") {
-            throw InvalidTokenException("Access Token으로 재발급할 수 없습니다")
-        }
-        
-        // userId 추출
-        val userId = jwtTokenProvider.getUserId(refreshToken)
-        
-        // Redis에 저장된 토큰과 비교
-        if (!refreshTokenService.validateRefreshToken(userId, refreshToken)) {
+
+        if (!jwtTokenProvider.validateToken(refreshToken)) throw InvalidTokenException("유효하지 않은 Refresh Token입니다")
+        if (jwtTokenProvider.getTokenType(refreshToken) != "refresh") throw InvalidTokenException("Access Token으로 재발급할 수 없습니다")
+
+        val id = jwtTokenProvider.getUserId(refreshToken)
+        val role = jwtTokenProvider.getRole(refreshToken)
+
+        if (!refreshTokenService.validateRefreshToken(id, refreshToken, role)) {
             throw InvalidTokenException("Refresh Token이 일치하지 않습니다")
         }
-        
-        // User 정보 조회
-        val user = userService.findById(userId)
-        
-        // 새로운 Access Token 생성
-        val newAccessToken = jwtTokenProvider.createAccessToken(user.id, user.role)
-        
-        logger.info { "✅ Access Token 재발급: userId=${user.id}" }
-        
-        return TokenResponse(
-            accessToken = newAccessToken,
-            refreshToken = refreshToken,  // 기존 Refresh Token 재사용
-            userId = user.id,
-            role = user.role
-        )
+
+        val newAccessToken = jwtTokenProvider.createAccessToken(id, role)
+        logger.info { "Access Token 재발급: id=$id, role=$role" }
+
+        return TokenResponse(accessToken = newAccessToken, refreshToken = refreshToken, userId = id, role = role)
     }
-    
-    /**
-     * 로그아웃
-     */
+
     @Transactional
     fun logout(accessToken: String, httpRequest: HttpServletRequest?) {
-        // Access Token을 Blacklist에 추가
         tokenBlacklistService.addToBlacklist(accessToken)
-        
-        // userId 추출
-        val userId = jwtTokenProvider.getUserId(accessToken)
-        
-        // Refresh Token 삭제
-        refreshTokenService.deleteRefreshToken(userId)
-        
-        // 감사 로그
-        auditLogService.logLogout(userId, httpRequest)
-        
-        logger.info { "✅ 로그아웃: userId=$userId" }
+        val id = jwtTokenProvider.getUserId(accessToken)
+        val role = jwtTokenProvider.getRole(accessToken)
+        refreshTokenService.deleteRefreshToken(id, role)
+        auditLogService.logLogout(id, httpRequest)
+        logger.info { "로그아웃: id=$id, role=$role" }
+    }
+
+    private fun checkIpAndEmailBlock(email: String, ipAddress: String, httpRequest: HttpServletRequest?) {
+        if (loginAttemptService.isBlocked(ipAddress)) {
+            val remaining = loginAttemptService.getRemainingLockTime(ipAddress)
+            auditLogService.logLoginFailure(email, "IP 차단 (${remaining}초 남음)", httpRequest)
+            throw InvalidCredentialsException()
+        }
+        if (loginAttemptService.isBlockedByEmail(email)) {
+            auditLogService.logLoginFailure(email, "이메일 차단", httpRequest)
+            throw InvalidCredentialsException()
+        }
+    }
+
+    private fun recordFailureAndThrow(ipAddress: String, email: String, reason: String, httpRequest: HttpServletRequest?): Nothing {
+        loginAttemptService.recordFailure(ipAddress)
+        loginAttemptService.recordFailureByEmail(email)
+        auditLogService.logLoginFailure(email, reason, httpRequest)
+        throw InvalidCredentialsException()
+    }
+
+    private fun recordFailureWithLockCheck(lockable: com.eventfulcommerce.user.domain.entity.Lockable, ipAddress: String, email: String, httpRequest: HttpServletRequest?): Nothing {
+        loginAttemptService.recordFailure(ipAddress)
+        loginAttemptService.recordFailureByEmail(email)
+        val attempts = loginAttemptService.getAttemptsByEmail(email)
+        if (attempts >= 5) {
+            accountLockService.lock(lockable)
+            auditLogService.logLoginFailure(email, "5회 실패로 계정 잠금", httpRequest)
+        } else {
+            auditLogService.logLoginFailure(email, "비밀번호 불일치 (${attempts}회)", httpRequest)
+        }
+        throw InvalidCredentialsException()
+    }
+
+    private fun getClientIP(request: HttpServletRequest?): String {
+        if (request == null) return "unknown"
+        val headers = listOf(
+            "X-Forwarded-For", "Proxy-Client-IP", "WL-Proxy-Client-IP",
+            "HTTP_X_FORWARDED_FOR", "HTTP_CLIENT_IP", "HTTP_FORWARDED_FOR", "REMOTE_ADDR"
+        )
+        for (header in headers) {
+            val ip = request.getHeader(header)
+            if (!ip.isNullOrBlank() && ip != "unknown") return ip.split(",")[0].trim()
+        }
+        return request.remoteAddr ?: "unknown"
     }
 }

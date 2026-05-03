@@ -26,6 +26,11 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      group-id: order-service-group
+      auto-offset-reset: earliest
 
   # 모든 노드를 적는 이유는 1개만 설정했을 때 해당 노드가 죽어있을 수 있음.
   data:
@@ -47,6 +52,9 @@ spring:
 outbox:
   topic: order-events
   polling-ms: 200
+
+jwt:
+  secret: ${JWT_SECRET:}
 
 #logging:
 #  level:

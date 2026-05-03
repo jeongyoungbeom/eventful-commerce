@@ -18,6 +18,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.springframework.http.MediaType
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -31,6 +33,7 @@ class OrderIntegrationTest {
     private lateinit var mockMvc: MockMvc
     private lateinit var objectMapper: ObjectMapper
     private lateinit var ordersService: OrdersService
+    private val testUserId: UUID = UUID.randomUUID()
 
     @BeforeEach
     fun setUp() {
@@ -44,26 +47,25 @@ class OrderIntegrationTest {
             .standaloneSetup(OrderController(ordersService))
             .setControllerAdvice(GlobalExceptionHandler())
             .build()
+
+        // SecurityContext에 UUID principal 설정
+        val auth = UsernamePasswordAuthenticationToken(testUserId, null, emptyList())
+        SecurityContextHolder.getContext().authentication = auth
     }
 
     @AfterEach
     fun tearDown() {
         clearAllMocks()
+        SecurityContextHolder.clearContext()
     }
 
     @Test
     @DisplayName("POST /orders 요청이 성공하면 주문 ID 목록을 반환한다")
     fun `should create orders via API`() {
         val orderId = UUID.randomUUID().toString()
-        val request = listOf(
-            OrdersRequest(
-                userId = UUID.randomUUID().toString(),
-                productId = "PRODUCT-001",
-                totalAmount = 10000L
-            )
-        )
+        val request = listOf(OrdersRequest(productId = UUID.randomUUID(), quantity = 1))
 
-        every { ordersService.orders(any()) } returns listOf(orderId)
+        every { ordersService.orders(any(), testUserId) } returns listOf(orderId)
 
         mockMvc.perform(
             post("/orders")
@@ -73,22 +75,16 @@ class OrderIntegrationTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$[0]").value(orderId))
 
-        verify(exactly = 1) { ordersService.orders(request) }
+        verify(exactly = 1) { ordersService.orders(request, testUserId) }
     }
 
     @Test
     @DisplayName("재고 부족이면 409 Conflict와 에러 코드를 반환한다")
     fun `should return conflict when stock is insufficient`() {
         val failedOrderId = UUID.randomUUID().toString()
-        val request = listOf(
-            OrdersRequest(
-                userId = UUID.randomUUID().toString(),
-                productId = "PRODUCT-001",
-                totalAmount = 10000L
-            )
-        )
+        val request = listOf(OrdersRequest(productId = UUID.randomUUID(), quantity = 1))
 
-        every { ordersService.orders(any()) } throws InsufficientInventoryException(
+        every { ordersService.orders(any(), testUserId) } throws InsufficientInventoryException(
             message = "재고 부족으로 전체 주문이 취소되었습니다. 실패 주문: $failedOrderId",
             failedOrderIds = failedOrderId
         )
@@ -108,7 +104,7 @@ class OrderIntegrationTest {
     fun `should cancel order via API`() {
         val orderId = UUID.randomUUID()
 
-        every { ordersService.cancelOrder(orderId) } returns true
+        every { ordersService.cancelOrder(orderId, testUserId) } returns true
 
         mockMvc.perform(post("/orders/$orderId/cancel"))
             .andExpect(status().isOk)
@@ -121,7 +117,7 @@ class OrderIntegrationTest {
     fun `should return bad request when cancel fails`() {
         val orderId = UUID.randomUUID()
 
-        every { ordersService.cancelOrder(orderId) } returns false
+        every { ordersService.cancelOrder(orderId, testUserId) } returns false
 
         mockMvc.perform(post("/orders/$orderId/cancel"))
             .andExpect(status().isBadRequest)

@@ -33,6 +33,7 @@ class OrderEventsConsumer(
             }
         } catch (e: Exception) {
             logger.error(e) { "❌ Order 이벤트 처리 실패: $value" }
+            throw e
         }
     }
 

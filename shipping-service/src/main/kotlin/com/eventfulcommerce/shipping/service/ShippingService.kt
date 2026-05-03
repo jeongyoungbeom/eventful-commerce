@@ -7,6 +7,7 @@ import com.eventfulcommerce.shipping.domain.ShippingStatus
 import com.eventfulcommerce.shipping.repository.ShippingRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -32,7 +33,7 @@ class ShippingService(
         // 멱등성 체크
         try {
             processedEventRepository.save(ProcessedEvent(eventId))
-        } catch (e: Exception) {
+        } catch (e: DataIntegrityViolationException) {
             logger.info { "이미 처리된 이벤트: eventId=$eventId" }
             return
         }

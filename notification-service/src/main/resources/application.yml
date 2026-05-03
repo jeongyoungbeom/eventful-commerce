@@ -23,11 +23,14 @@ spring:
 
   kafka:
     bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       group-id: notification-service-group
-      auto-offset-reset: latest
+      auto-offset-reset: earliest
 
 telegram:
   bot:
@@ -48,8 +51,10 @@ outbox:
   topic: notification-events
   polling-ms: 200
 
+jwt:
+  secret: ${JWT_SECRET:}
+
 ---
-# Docker 프로필
 spring:
   config:
     activate:
@@ -58,3 +63,6 @@ spring:
     url: jdbc:postgresql://postgres:5432/notification_service
   kafka:
     bootstrap-servers: kafka:9092
+
+jwt:
+  secret: ${JWT_SECRET}

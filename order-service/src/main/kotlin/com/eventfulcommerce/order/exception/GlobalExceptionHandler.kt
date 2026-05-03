@@ -103,6 +103,19 @@ class GlobalExceptionHandler {
             ))
     }
 
+    @ExceptionHandler(OrderForbiddenException::class)
+    fun handleOrderForbidden(ex: OrderForbiddenException): ResponseEntity<ErrorResponse> {
+        logger.warn { "주문 권한 없음: ${ex.message}" }
+        return ResponseEntity
+            .status(HttpStatus.FORBIDDEN)
+            .body(ErrorResponse(
+                code = "ORDER_FORBIDDEN",
+                message = ex.message ?: "해당 주문에 대한 권한이 없습니다.",
+                details = mapOf("orderId" to ex.orderId.toString()),
+                timestamp = Instant.now()
+            ))
+    }
+
     /**
      * 모든 예외를 처리하는 폴백 핸들러
      */

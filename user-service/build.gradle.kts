@@ -7,6 +7,8 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":common-auth"))
+
     // Spring Security & JWT
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("io.jsonwebtoken:jjwt-api:0.12.3")

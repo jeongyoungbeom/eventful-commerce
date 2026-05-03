@@ -14,6 +14,9 @@ class Payment(
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
 
+    @Column(name = "seller_id", nullable = false)
+    val sellerId: UUID,
+
     @Column(nullable = true)
     var reservationId: UUID? = null,
 

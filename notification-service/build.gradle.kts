@@ -9,6 +9,9 @@ plugins {
 dependencies {
     implementation(project(":common-outbox"))
     implementation(project(":common-idempotency"))
+    implementation(project(":common-auth"))
+
+    implementation("org.springframework.boot:spring-boot-starter-security")
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-validation")

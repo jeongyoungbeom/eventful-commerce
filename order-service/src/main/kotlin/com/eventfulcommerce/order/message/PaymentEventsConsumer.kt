@@ -11,7 +11,7 @@ class PaymentEventsConsumer(
     private val objectMapper: ObjectMapper,
     private val ordersService: OrdersService
 ) {
-    @KafkaListener(topics = ["payment-events"], groupId = "order-service")
+    @KafkaListener(topics = ["payment-events"], groupId = "order-service-group")
     fun receive(value: String) {
         val readValue = objectMapper.readValue(value, OutboxEventMessage::class.java)
         if (readValue.eventType == "PAYMENT_COMPLETED") {

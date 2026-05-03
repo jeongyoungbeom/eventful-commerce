@@ -5,8 +5,10 @@ import com.eventfulcommerce.common.OutboxEventService
 import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.domain.entity.Orders
+import com.eventfulcommerce.order.domain.entity.ProductReadModel
 import com.eventfulcommerce.order.exception.InsufficientInventoryException
 import com.eventfulcommerce.order.repository.OrdersRepository
+import com.eventfulcommerce.order.repository.ProductReadModelRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.time.Instant
+import java.util.Optional
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -35,15 +38,21 @@ class ConcurrencyStressTest {
 
     private lateinit var ordersService: OrdersService
     private lateinit var ordersRepository: OrdersRepository
+    private lateinit var productReadModelRepository: ProductReadModelRepository
     private lateinit var outboxEventService: OutboxEventService
     private lateinit var inventoryReservationService: InventoryReservationService
     private lateinit var idempotencyHandler: IdempotencyHandler
     private lateinit var orderCancelService: OrderCancelService
     private lateinit var objectMapper: ObjectMapper
 
+    private val productId = UUID.randomUUID()
+    private val productId2 = UUID.randomUUID()
+    private val sellerId = UUID.randomUUID()
+
     @BeforeEach
     fun setUp() {
         ordersRepository = mockk()
+        productReadModelRepository = mockk()
         outboxEventService = mockk()
         inventoryReservationService = mockk()
         idempotencyHandler = mockk()
@@ -57,9 +66,16 @@ class ConcurrencyStressTest {
         every { ordersRepository.saveAll(any<Iterable<Orders>>()) } answers {
             firstArg<Iterable<Orders>>().onEach { assignPersistenceFields(it) }.toList()
         }
+        every { productReadModelRepository.findById(productId) } returns Optional.of(
+            ProductReadModel(productId = productId, sellerId = sellerId, name = "상품1", price = 10000L, stock = 100, category = "ELECTRONICS")
+        )
+        every { productReadModelRepository.findById(productId2) } returns Optional.of(
+            ProductReadModel(productId = productId2, sellerId = sellerId, name = "상품2", price = 20000L, stock = 100, category = "ELECTRONICS")
+        )
 
         ordersService = OrdersService(
             ordersRepository = ordersRepository,
+            productReadModelRepository = productReadModelRepository,
             outboxEventService = outboxEventService,
             inventoryReservationService = inventoryReservationService,
             idempotencyHandler = idempotencyHandler,
@@ -103,11 +119,7 @@ class ConcurrencyStressTest {
         val releasedReservations = mutableListOf<UUID>()
 
         every { inventoryReservationService.reserve(any(), any(), any()) } answers {
-            if (stock.compareAndSet(1, 0)) {
-                UUID.randomUUID().also { issuedReservations += it }
-            } else {
-                null
-            }
+            if (stock.compareAndSet(1, 0)) UUID.randomUUID().also { issuedReservations += it } else null
         }
         every { inventoryReservationService.release(any(), any()) } answers {
             releasedReservations += secondArg<UUID>()
@@ -115,13 +127,10 @@ class ConcurrencyStressTest {
             Unit
         }
 
-        val requests = listOf(
-            OrdersRequest(UUID.randomUUID().toString(), "PRODUCT-001", 10000L),
-            OrdersRequest(UUID.randomUUID().toString(), "PRODUCT-001", 20000L)
-        )
+        val requests = listOf(OrdersRequest(productId, 1), OrdersRequest(productId2, 1))
 
         val exception = assertThrows<InsufficientInventoryException> {
-            ordersService.orders(requests)
+            ordersService.orders(requests, UUID.randomUUID())
         }
 
         assertTrue(exception.message!!.contains("재고 부족"))
@@ -158,9 +167,7 @@ class ConcurrencyStressTest {
         repeat(requestCount) {
             executor.submit {
                 try {
-                    ordersService.orders(
-                        listOf(OrdersRequest(UUID.randomUUID().toString(), "PRODUCT-001", 10000L))
-                    )
+                    ordersService.orders(listOf(OrdersRequest(productId, 1)), UUID.randomUUID())
                     successCount.incrementAndGet()
                 } catch (e: InsufficientInventoryException) {
                     failureCount.incrementAndGet()
@@ -181,47 +188,15 @@ class ConcurrencyStressTest {
     }
 
     private fun assignPersistenceFields(order: Orders) {
-        if (!isIdInitialized(order)) {
-            order.id = UUID.randomUUID()
-        }
-        if (!isCreatedAtInitialized(order)) {
-            order.createdAt = Instant.now()
-        }
-        if (!isUpdatedAtInitialized(order)) {
-            order.updatedAt = Instant.now()
-        }
-        if (order.status != OrdersStatus.ORDER_RESERVED) {
-            order.status = OrdersStatus.ORDER_RESERVED
-        }
+        if (!isIdInitialized(order)) order.id = UUID.randomUUID()
+        if (!isCreatedAtInitialized(order)) order.createdAt = Instant.now()
+        if (!isUpdatedAtInitialized(order)) order.updatedAt = Instant.now()
+        if (order.status != OrdersStatus.ORDER_RESERVED) order.status = OrdersStatus.ORDER_RESERVED
     }
 
-    private fun isIdInitialized(order: Orders): Boolean =
-        try {
-            order.id
-            true
-        } catch (e: UninitializedPropertyAccessException) {
-            false
-        }
-
-    private fun isCreatedAtInitialized(order: Orders): Boolean =
-        try {
-            order.createdAt
-            true
-        } catch (e: UninitializedPropertyAccessException) {
-            false
-        }
-
-    private fun isUpdatedAtInitialized(order: Orders): Boolean =
-        try {
-            order.updatedAt
-            true
-        } catch (e: UninitializedPropertyAccessException) {
-            false
-        }
-
-    private data class ConcurrentOrderResult(
-        val successCount: Int,
-        val failureCount: Int,
-        val remainingStock: Int
-    )
+    private fun isIdInitialized(order: Orders) = try { order.id; true } catch (e: UninitializedPropertyAccessException) { false }
+    private fun isCreatedAtInitialized(order: Orders) = try { order.createdAt; true } catch (e: UninitializedPropertyAccessException) { false }
+    private fun isUpdatedAtInitialized(order: Orders) = try { order.updatedAt; true } catch (e: UninitializedPropertyAccessException) { false }
 }
+
+data class ConcurrentOrderResult(val successCount: Int, val failureCount: Int, val remainingStock: Int)

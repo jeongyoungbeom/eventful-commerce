@@ -203,14 +203,44 @@ services:
   # ========================================
   # Application Services
   # ========================================
-  
+
+  api-gateway:
+    image: jybeomss1/api-gateway:latest
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+    depends_on:
+      redis-node-1:
+        condition: service_started
+      redis-node-2:
+        condition: service_started
+      redis-node-3:
+        condition: service_started
+      redis-node-4:
+        condition: service_started
+      redis-node-5:
+        condition: service_started
+      redis-node-6:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - eventful-network
+    restart: always
+
   order-service:
     image: jybeomss1/order-service:latest
     container_name: order-service
-    ports:
-      - "8081:8081"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -235,8 +265,6 @@ services:
   payment-service:
     image: jybeomss1/payment-service:latest
     container_name: payment-service
-    ports:
-      - "8082:8082"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
     depends_on:
@@ -251,8 +279,6 @@ services:
   shipping-service:
     image: jybeomss1/shipping-service:latest
     container_name: shipping-service
-    ports:
-      - "8083:8083"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
     depends_on:
@@ -267,14 +293,74 @@ services:
   notification-service:
     image: jybeomss1/notification-service:latest
     container_name: notification-service
-    ports:
-      - "8084:8084"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-your-bot-token-here}
       - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-eventful_commerce_bot}
       - TELEGRAM_DEFAULT_USER_ID=${TELEGRAM_DEFAULT_USER_ID:-}
       - TELEGRAM_DEFAULT_CHAT_ID=${TELEGRAM_DEFAULT_CHAT_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - eventful-network
+    restart: on-failure
+
+  user-service:
+    image: jybeomss1/user-service:latest
+    container_name: user-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      # REQUIRED: JWT secret must be provided via environment variable
+      # DO NOT use default values in production!
+      # Generate with: openssl rand -base64 64
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET environment variable is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis-node-1:
+        condition: service_started
+      redis-node-2:
+        condition: service_started
+      redis-node-3:
+        condition: service_started
+      redis-node-4:
+        condition: service_started
+      redis-node-5:
+        condition: service_started
+      redis-node-6:
+        condition: service_started
+    networks:
+      - eventful-network
+    restart: on-failure
+
+  product-service:
+    image: jybeomss1/product-service:latest
+    container_name: product-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - eventful-network
+    restart: on-failure
+
+  settlement-service:
+    image: jybeomss1/settlement-service:latest
+    container_name: settlement-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - SETTLEMENT_PLATFORM_FEE_RATE=${SETTLEMENT_PLATFORM_FEE_RATE:-0.10}
     depends_on:
       postgres:
         condition: service_healthy
@@ -296,3 +382,5 @@ volumes:
 networks:
   eventful-network:
     driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv4: "true"

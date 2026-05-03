@@ -69,6 +69,20 @@ class InventoryReservationService(
         logger.debug { "재고 해제: productId=$productId, reservationId=$reservationId" }
     }
 
+    fun initializeStock(productId: String, initialStock: Int) {
+        val stockK = stockKey(productId)
+        val holdK = holdCountKey(productId)
+        redisTemplate.opsForValue().set(stockK, initialStock.toString())
+        redisTemplate.opsForValue().set(holdK, "0")
+        logger.info { "Redis 재고 초기화: productId=$productId, stock=$initialStock" }
+    }
+
+    fun adjustStock(productId: String, delta: Int) {
+        val stockK = stockKey(productId)
+        redisTemplate.opsForValue().increment(stockK, delta.toLong())
+        logger.info { "Redis 재고 조정: productId=$productId, delta=$delta" }
+    }
+
     fun getStockSummary(productId: String) {
         val stock = redisTemplate.opsForValue().get(stockKey(productId))?.toLong() ?: 0L
         val holds = redisTemplate.opsForValue().get(holdCountKey(productId))?.toLong() ?: 0L

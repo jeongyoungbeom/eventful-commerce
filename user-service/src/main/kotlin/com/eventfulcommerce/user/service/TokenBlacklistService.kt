@@ -1,5 +1,6 @@
 package com.eventfulcommerce.user.service
 
+import com.eventfulcommerce.common.auth.JwtTokenProvider
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.stereotype.Service

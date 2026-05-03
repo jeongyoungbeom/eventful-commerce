@@ -61,6 +61,7 @@ class IdempotencyTest {
 
         ordersService = OrdersService(
             ordersRepository = ordersRepository,
+            productReadModelRepository = mockk(),
             outboxEventService = outboxEventService,
             inventoryReservationService = inventoryReservationService,
             idempotencyHandler = IdempotencyHandler(processedEventRepository),
@@ -89,7 +90,7 @@ class IdempotencyTest {
             else throw DataIntegrityViolationException("duplicate event")
         }
         every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { inventoryReservationService.commit(order.productId, reservationId) } just Runs
+        every { inventoryReservationService.commit(order.productId.toString(), reservationId) } just Runs
         every { ordersRepository.save(order) } returns order
         every { outboxEventService.record(any()) } just Runs
 
@@ -98,7 +99,7 @@ class IdempotencyTest {
         }
 
         assertEquals(OrdersStatus.ORDER_CONFIRMED, order.status)
-        verify(exactly = 1) { inventoryReservationService.commit(order.productId, reservationId) }
+        verify(exactly = 1) { inventoryReservationService.commit(order.productId.toString(), reservationId) }
         verify(exactly = 1) { ordersRepository.save(order) }
         verify(exactly = 1) { outboxEventService.record(match { it.size == 1 }) }
     }
@@ -118,7 +119,7 @@ class IdempotencyTest {
             else throw DataIntegrityViolationException("duplicate event")
         }
         every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { inventoryReservationService.commit(order.productId, reservationId) } just Runs
+        every { inventoryReservationService.commit(order.productId.toString(), reservationId) } just Runs
         every { ordersRepository.save(order) } returns order
         every { outboxEventService.record(any()) } just Runs
 
@@ -139,7 +140,7 @@ class IdempotencyTest {
         assertTrue(latch.await(10, TimeUnit.SECONDS), "동시 이벤트 처리가 제한 시간 안에 끝나야 합니다.")
         executor.shutdownNow()
 
-        verify(exactly = 1) { inventoryReservationService.commit(order.productId, reservationId) }
+        verify(exactly = 1) { inventoryReservationService.commit(order.productId.toString(), reservationId) }
         verify(exactly = 1) { ordersRepository.save(order) }
         verify(exactly = 1) { outboxEventService.record(any()) }
     }
@@ -155,7 +156,7 @@ class IdempotencyTest {
 
         every { processedEventRepository.save(any()) } answers { firstArg<ProcessedEvent>() }
         every { ordersRepository.findById(orderId) } returns Optional.of(order)
-        every { inventoryReservationService.commit(order.productId, reservationId) } just Runs
+        every { inventoryReservationService.commit(order.productId.toString(), reservationId) } just Runs
         every { ordersRepository.save(order) } returns order
         every { outboxEventService.record(any()) } just Runs
 
@@ -163,7 +164,7 @@ class IdempotencyTest {
         ordersService.handlePaymentCompleted(secondEvent)
 
         verify(exactly = 2) { processedEventRepository.save(any()) }
-        verify(exactly = 1) { inventoryReservationService.commit(order.productId, reservationId) }
+        verify(exactly = 1) { inventoryReservationService.commit(order.productId.toString(), reservationId) }
         verify(exactly = 1) { ordersRepository.save(order) }
         verify(exactly = 1) { outboxEventService.record(any()) }
     }
@@ -194,7 +195,9 @@ class IdempotencyTest {
     private fun reservedOrder(orderId: UUID, reservationId: UUID): Orders =
         Orders(
             userId = UUID.randomUUID(),
-            productId = "PRODUCT-001",
+            productId = UUID.randomUUID(),
+            sellerId = UUID.randomUUID(),
+            quantity = 1,
             totalAmount = 10000L,
             status = OrdersStatus.ORDER_RESERVED,
             reservationId = reservationId,
@@ -211,6 +214,7 @@ class IdempotencyTest {
             reservationId = order.reservationId,
             orderId = order.id,
             userId = order.userId,
+            sellerId = order.sellerId,
             amount = order.totalAmount,
             completedAt = Instant.now()
         )

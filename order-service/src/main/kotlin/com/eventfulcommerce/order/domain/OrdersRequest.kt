@@ -1,18 +1,19 @@
 package com.eventfulcommerce.order.domain
 
 import com.eventfulcommerce.order.domain.entity.Orders
-import java.util.*
+import java.util.UUID
 
 data class OrdersRequest(
-    val userId: String,
-    val productId: String,
-    val totalAmount: Long
+    val productId: UUID,
+    val quantity: Int
 ) {
-    fun toEntity(): Orders {
+    fun toEntity(userId: UUID, sellerId: UUID, price: Long): Orders {
         return Orders(
-            userId = UUID.fromString(userId),
+            userId = userId,
             productId = productId,
-            totalAmount = totalAmount,
+            sellerId = sellerId,
+            quantity = quantity,
+            totalAmount = price * quantity,
             status = OrdersStatus.ORDER_RESERVED,
         )
     }

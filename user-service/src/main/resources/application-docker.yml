@@ -1,8 +1,14 @@
 spring:
   datasource:
-    url: jdbc:postgresql://postgres:5432/user_service_db
+    url: jdbc:postgresql://postgres:5432/user_service
     username: postgres
     password: postgres
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
   data:
     redis:
       cluster:

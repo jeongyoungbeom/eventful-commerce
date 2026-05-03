@@ -31,6 +31,7 @@ class PaymentEventsConsumer(
             }
         } catch (e: Exception) {
             logger.error(e) { "❌ Payment 이벤트 처리 실패: $value" }
+            throw e
         }
     }
 

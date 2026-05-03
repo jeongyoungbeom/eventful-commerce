@@ -8,6 +8,7 @@ data class PaymentCompletedPayload(
     val reservationId: UUID? = null,
     val orderId: UUID,
     val userId: UUID,
+    val sellerId: UUID,
     val amount: Long,
     val completedAt: Instant
 )

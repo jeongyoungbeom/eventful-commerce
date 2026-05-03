@@ -43,6 +43,7 @@ class PaymentWebhookService(
             paymentId = payment.id,
             orderId = payment.orderId,
             userId = payment.userId,
+            sellerId = payment.sellerId,
             amount = payment.amount,
             reservationId = payment.reservationId,
             completedAt = Instant.now()
@@ -72,9 +73,10 @@ class PaymentWebhookService(
             paymentId = payment.id,
             orderId = payment.orderId,
             amount = payment.amount,
-            reservationId = payment.reservationId!!,
+            reservationId = payment.reservationId
+                ?: throw IllegalArgumentException("reservationId가 없습니다: paymentId=${payment.id}"),
             failedAt = Instant.now(),
-            pgTxId = request.pgTxId!!
+            pgTxId = request.pgTxId ?: ""
         )
 
         logger.info { "결제 실패" }

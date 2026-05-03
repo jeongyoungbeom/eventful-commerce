@@ -23,7 +23,6 @@ class RateLimitService(
      * @return true: 허용, false: 차단
      */
     fun checkRateLimit(ipAddress: String): Boolean {
-        val key = RATE_LIMIT_PREFIX + ipAddress
         val currentCount = getCurrentCount(ipAddress)
         
         if (currentCount >= MAX_REQUESTS_PER_MINUTE) {

@@ -1,0 +1,73 @@
+spring:
+  data:
+    redis:
+      cluster:
+        nodes:
+          - redis-node-1:7001
+          - redis-node-2:7002
+          - redis-node-3:7003
+          - redis-node-4:7004
+          - redis-node-5:7005
+          - redis-node-6:7006
+        max-redirects: 3
+      lettuce:
+        cluster:
+          refresh:
+            adaptive: true
+            period: 30s
+
+  cloud:
+    gateway:
+      mvc:
+        routes:
+          - id: order-service
+            uri: http://order-service:8081
+            predicates:
+              - Path=/api/orders/**
+            filters:
+              - StripPrefix=1
+
+          - id: payment-service
+            uri: http://payment-service:8082
+            predicates:
+              - Path=/api/payments/**
+            filters:
+              - StripPrefix=1
+
+          - id: notification-service
+            uri: http://notification-service:8084
+            predicates:
+              - Path=/api/telegram/**
+            filters:
+              - StripPrefix=1
+
+          - id: user-service-auth
+            uri: http://user-service:8085
+            predicates:
+              - Path=/api/auth/**
+            filters:
+              - StripPrefix=1
+
+          - id: user-service-users
+            uri: http://user-service:8085
+            predicates:
+              - Path=/api/users/**
+            filters:
+              - StripPrefix=1
+
+          - id: product-service
+            uri: http://product-service:8086
+            predicates:
+              - Path=/api/products/**
+            filters:
+              - StripPrefix=1
+
+          - id: settlement-service
+            uri: http://settlement-service:8087
+            predicates:
+              - Path=/api/settlements/**
+            filters:
+              - StripPrefix=1
+
+jwt:
+  secret: ${JWT_SECRET}
