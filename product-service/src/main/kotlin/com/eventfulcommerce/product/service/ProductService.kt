@@ -123,6 +123,7 @@ class ProductService(
     fun getProduct(productId: UUID): ProductResponse {
         val product = productRepository.findById(productId)
             .orElseThrow { ProductNotFoundException(productId) }
+        if (product.status != ProductStatus.ACTIVE) throw ProductNotFoundException(productId)
         return ProductResponse.from(product)
     }
 

@@ -42,7 +42,6 @@ data class UpdateProductRequest(
 )
 
 data class UpdateStockRequest(
-    @field:NotNull(message = "재고 변경량은 필수입니다")
     val delta: Int  // 양수: 재고 추가, 음수: 재고 감소
 )
 

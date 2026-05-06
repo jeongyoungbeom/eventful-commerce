@@ -39,7 +39,7 @@ class GatewayJwtFilter(
         response: HttpServletResponse,
         filterChain: FilterChain
     ) {
-        if (isPublicPath(request.requestURI)) {
+        if (isPublicPath(request)) {
             filterChain.doFilter(request, response)
             return
         }
@@ -77,7 +77,14 @@ class GatewayJwtFilter(
         filterChain.doFilter(mutatedRequest, response)
     }
 
-    private fun isPublicPath(uri: String) = PUBLIC_PATHS.any { uri == it || uri.startsWith("$it/") }
+    private fun isPublicPath(request: HttpServletRequest): Boolean {
+        val uri = request.requestURI
+        if (PUBLIC_PATHS.any { uri == it || uri.startsWith("$it/") }) return true
+        // 상품 목록/상세 조회는 비로그인 허용 (GET 전용, UUID 형식만 매칭하여 /my 등 특수 경로 제외)
+        val uuidPattern = Regex("/api/products/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+        if (request.method == "GET" && (uri == "/api/products" || uri.matches(uuidPattern))) return true
+        return false
+    }
 
     private fun isBlacklisted(token: String) = redisTemplate.hasKey("$BLACKLIST_PREFIX$token")
 

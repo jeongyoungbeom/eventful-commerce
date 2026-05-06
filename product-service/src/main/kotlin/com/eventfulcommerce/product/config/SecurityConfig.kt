@@ -3,6 +3,7 @@ package com.eventfulcommerce.product.config
 import com.eventfulcommerce.common.auth.GatewayAuthFilter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
@@ -23,6 +24,7 @@ class SecurityConfig {
             .authorizeHttpRequests { auth ->
                 auth
                     .requestMatchers("/actuator/**", "/error").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/products", "/products/*").permitAll()
                     .anyRequest().authenticated()
             }
             .addFilterBefore(GatewayAuthFilter(), UsernamePasswordAuthenticationFilter::class.java)

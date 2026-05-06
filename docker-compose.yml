@@ -49,7 +49,8 @@ services:
     volumes:
       - redis-node-1-data:/data
     networks:
-      - eventful-network
+      eventful-network:
+        ipv4_address: 172.20.0.11
 
   redis-node-2:
     image: redis:7-alpine
@@ -73,7 +74,8 @@ services:
     volumes:
       - redis-node-2-data:/data
     networks:
-      - eventful-network
+      eventful-network:
+        ipv4_address: 172.20.0.12
 
   redis-node-3:
     image: redis:7-alpine
@@ -97,7 +99,8 @@ services:
     volumes:
       - redis-node-3-data:/data
     networks:
-      - eventful-network
+      eventful-network:
+        ipv4_address: 172.20.0.13
 
   redis-node-4:
     image: redis:7-alpine
@@ -121,7 +124,8 @@ services:
     volumes:
       - redis-node-4-data:/data
     networks:
-      - eventful-network
+      eventful-network:
+        ipv4_address: 172.20.0.14
 
   redis-node-5:
     image: redis:7-alpine
@@ -145,7 +149,8 @@ services:
     volumes:
       - redis-node-5-data:/data
     networks:
-      - eventful-network
+      eventful-network:
+        ipv4_address: 172.20.0.15
 
   redis-node-6:
     image: redis:7-alpine
@@ -169,7 +174,8 @@ services:
     volumes:
       - redis-node-6-data:/data
     networks:
-      - eventful-network
+      eventful-network:
+        ipv4_address: 172.20.0.16
 
   # ========================================
   # Kafka (KRaft 모드, ZooKeeper 없음)
@@ -384,3 +390,7 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.enable_ipv4: "true"
+      com.docker.network.enable_ipv6: "false"
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
