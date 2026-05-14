@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/product_service
+  kafka:
+    bootstrap-servers: kafka:9092
+
+jwt:
+  secret: ${JWT_SECRET}
+
+image:
+  upload-dir: /app/images
+  base-url: ${IMAGE_BASE_URL:http://localhost/images}

@@ -19,6 +19,9 @@ if [ ! -f .env ]; then
 # Auto-generated environment variables
 # Generated at: $(date)
 
+# CORS (쉼표로 구분해서 여러 origin 허용 가능, * 는 전체 허용)
+CORS_ALLOWED_ORIGINS=*
+
 # JWT Secret (Auto-generated)
 JWT_SECRET=${JWT_SECRET}
 
@@ -105,16 +108,10 @@ echo "=========================================="
 echo "✅ All services started successfully!"
 echo ""
 echo "📊 Service URLs:"
-echo "  - Order Service:      http://localhost:8081"
-echo "  - Payment Service:    http://localhost:8082"
-echo "  - Shipping Service:   http://localhost:8083"
-echo "  - Notification:       http://localhost:8084"
-echo "  - User Service:       http://localhost:8085"
-echo "  - Product Service:    http://localhost:8086"
-echo "  - Settlement Service: http://localhost:8087"
-echo "  - PostgreSQL:       localhost:5432"
-echo "  - Redis Cluster:    localhost:7001-7006"
-echo "  - Kafka:            localhost:9092"
+echo "  - API (Nginx):        http://localhost:80"
+echo "  - PostgreSQL:         localhost:5432"
+echo "  - Redis Cluster:      localhost:7001-7006"
+echo "  - Kafka:              localhost:9092"
 echo ""
 echo "📝 Useful Commands:"
 echo "  - Check status: docker-compose ps"

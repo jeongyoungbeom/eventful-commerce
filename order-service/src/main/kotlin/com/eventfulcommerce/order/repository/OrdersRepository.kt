@@ -12,4 +12,6 @@ interface OrdersRepository : JpaRepository<Orders, UUID> {
         status: OrdersStatus,
         expiresAt: Instant
     ): List<Orders>
+
+    fun findByUserIdOrderByCreatedAtDesc(userId: UUID): List<Orders>
 }

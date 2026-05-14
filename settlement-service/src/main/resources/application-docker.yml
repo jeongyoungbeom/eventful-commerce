@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/settlement_service
+  kafka:
+    bootstrap-servers: kafka:9092
+  data:
+    redis:
+      cluster:
+        nodes:
+          - redis-node-1:7001
+          - redis-node-2:7002
+          - redis-node-3:7003
+          - redis-node-4:7004
+          - redis-node-5:7005
+          - redis-node-6:7006
+
+jwt:
+  secret: ${JWT_SECRET}
+
+outbox:
+  publisher:
+    enabled: false

@@ -5,10 +5,18 @@ import java.util.UUID
 
 data class PaymentCompletedPayload(
     val paymentId: UUID,
-    val reservationId: UUID? = null,
     val orderId: UUID,
     val userId: UUID,
-    val sellerId: UUID,
     val amount: Long,
+    val sellerOrders: List<PaymentCompletedSellerPayload> = emptyList(),
     val completedAt: Instant
+)
+
+data class PaymentCompletedSellerPayload(
+    val sellerOrderId: UUID,
+    val sellerId: UUID,
+    val paymentAmount: Long,
+    val commissionRate: Double,
+    val commissionAmount: Long,
+    val settlementAmount: Long
 )

@@ -1,24 +1,22 @@
 package com.eventfulcommerce.order.service
 
-import com.eventfulcommerce.common.IdempotencyHandler
-import com.eventfulcommerce.common.OrderConfirmedPayload
-import com.eventfulcommerce.common.OrderReservedPayload
-import com.eventfulcommerce.common.OutboxEvent
-import com.eventfulcommerce.common.OutboxEventMessage
-import com.eventfulcommerce.common.OutboxEventService
-import com.eventfulcommerce.common.OutboxStatus
-import com.eventfulcommerce.common.PaymentCompletedPayload
-import com.eventfulcommerce.common.PaymentFailedPayload
+import com.eventfulcommerce.common.*
 import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.domain.OrdersStatus
+import com.eventfulcommerce.order.domain.entity.OrderItem
 import com.eventfulcommerce.order.domain.entity.Orders
-import com.eventfulcommerce.order.exception.InsufficientInventoryException
+import com.eventfulcommerce.order.domain.entity.SellerOrder
+import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
+import com.eventfulcommerce.order.dto.FailedOrderItemResponse
+import com.eventfulcommerce.order.dto.OrderResponse
 import com.eventfulcommerce.order.exception.OrderForbiddenException
 import com.eventfulcommerce.order.exception.OrderNotFoundException
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
+import com.eventfulcommerce.order.repository.SellerOrderRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -29,98 +27,130 @@ private val logger = KotlinLogging.logger {}
 @Service
 class OrdersService(
     private val ordersRepository: OrdersRepository,
+    private val sellerOrderRepository: SellerOrderRepository,
     private val productReadModelRepository: ProductReadModelRepository,
     private val outboxEventService: OutboxEventService,
     private val inventoryReservationService: InventoryReservationService,
     private val idempotencyHandler: IdempotencyHandler,
     private val objectMapper: ObjectMapper,
-    private val orderCancelService: OrderCancelService
+    private val orderCancelService: OrderCancelService,
+    @Value("\${order.commission-rate:0.1}") private val commissionRate: Double
 ) {
     private val ttlSeconds = 10 * 60L
 
     @Transactional
-    fun orders(ordersRequests: List<OrdersRequest>, userId: UUID): List<String> {
-        // 1단계: 상품 유효성 검증 (주문 생성 전 fail-fast)
-        val products = ordersRequests.map { request ->
-            val product = productReadModelRepository.findById(request.productId)
-                .orElseThrow { IllegalArgumentException("상품을 찾을 수 없습니다: ${request.productId}") }
-            require(product.status == "ACTIVE") { "판매 중인 상품이 아닙니다: ${request.productId}" }
-            product
-        }
+    fun orders(request: OrdersRequest, userId: UUID): OrderResponse {
+        val order = ordersRepository.save(
+            Orders(
+                userId = userId,
+                status = OrdersStatus.ORDER_RESERVED,
+                expiresAt = Instant.now().plusSeconds(ttlSeconds)
+            )
+        )
 
-        // 2단계: 주문 엔티티 생성 및 초기 저장
-        val orderList = ordersRequests.mapIndexed { i, request ->
-            val product = products[i]
-            request.toEntity(userId, product.sellerId, product.price)
-        }
-        val savedOrders = ordersRepository.saveAll(orderList)
+        val failedItems = mutableListOf<FailedOrderItemResponse>()
+        val reservedItems = request.items.mapNotNull { itemRequest ->
+            val product = productReadModelRepository.findById(itemRequest.productId).orElse(null)
+            if (product == null || product.status != "ACTIVE") {
+                failedItems.add(
+                    FailedOrderItemResponse(
+                        productId = itemRequest.productId,
+                        reason = "PRODUCT_NOT_AVAILABLE",
+                        requestedQuantity = itemRequest.quantity,
+                        availableQuantity = 0
+                    )
+                )
+                return@mapNotNull null
+            }
 
-        logger.info { "주문 생성 시작 - 총 ${savedOrders.size}건" }
-
-        // 3단계: 모든 주문에 대해 재고 예약 시도
-        val reservationResults = mutableListOf<Pair<Orders, UUID?>>()
-
-        for (order in savedOrders) {
-            val reservationId = inventoryReservationService.reserve(order.productId.toString(), order.id, ttlSeconds)
-            reservationResults.add(order to reservationId)
+            val reservationId = inventoryReservationService.reserve(
+                productId = product.productId.toString(),
+                orderId = order.id,
+                quantity = itemRequest.quantity,
+                ttlSeconds = ttlSeconds
+            )
 
             if (reservationId == null) {
-                logger.warn { "재고 부족 발견 - 전체 주문 롤백: orderId=${order.id}" }
-
-                reservationResults.forEach { (prevOrder, prevReservationId) ->
-                    if (prevReservationId != null) {
-                        inventoryReservationService.release(prevOrder.productId.toString(), prevReservationId)
-                        logger.info { "재고 예약 롤백: orderId=${prevOrder.id}, reservationId=$prevReservationId" }
-                    }
-                }
-
-                throw InsufficientInventoryException(
-                    message = "재고 부족으로 전체 주문이 취소되었습니다. 실패 주문: ${order.id}",
-                    failedOrderIds = savedOrders.joinToString { it.id.toString() }
+                failedItems.add(
+                    FailedOrderItemResponse(
+                        productId = itemRequest.productId,
+                        reason = "INSUFFICIENT_STOCK",
+                        requestedQuantity = itemRequest.quantity,
+                        availableQuantity = inventoryReservationService.getAvailableStock(product.productId.toString())
+                    )
+                )
+                null
+            } else {
+                ReservedItem(
+                    productId = product.productId,
+                    productName = product.name,
+                    sellerId = product.sellerId,
+                    quantity = itemRequest.quantity,
+                    unitPrice = product.price,
+                    totalAmount = product.price * itemRequest.quantity,
+                    reservationId = reservationId
                 )
             }
         }
 
-        // 4단계: 모든 재고 예약 성공 → 주문 상태 업데이트
-        savedOrders.forEachIndexed { index, order ->
-            val reservationId = reservationResults[index].second!!
-            order.status = OrdersStatus.ORDER_RESERVED
-            order.reservationId = reservationId
-            order.expiresAt = Instant.now().plusSeconds(ttlSeconds)
+        if (reservedItems.isEmpty()) {
+            ordersRepository.delete(order)
+            logger.info { "주문 생성 생략 - 예약 성공 상품 없음: userId=$userId" }
+            return OrderResponse(
+                orderId = null,
+                totalItemAmount = 0,
+                totalDeliveryFee = 0,
+                totalPaymentAmount = 0,
+                totalCommissionAmount = 0,
+                totalSettlementAmount = 0,
+                status = OrdersStatus.ORDER_FAILED,
+                expiresAt = null,
+                sellerOrders = emptyList(),
+                failedItems = failedItems,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now()
+            )
         }
 
-        ordersRepository.saveAll(savedOrders)
-        logger.info { "모든 주문 예약 성공 - ${savedOrders.size}건" }
+        reservedItems.groupBy { it.sellerId }.forEach { (sellerId, items) ->
+            val itemTotalAmount = items.sumOf { it.totalAmount }
+            val deliveryFee = 0L
+            val commissionAmount = (itemTotalAmount * commissionRate).toLong()
+            val sellerOrder = SellerOrder(
+                order = order,
+                sellerId = sellerId,
+                itemTotalAmount = itemTotalAmount,
+                deliveryFee = deliveryFee,
+                paymentAmount = itemTotalAmount + deliveryFee,
+                commissionRate = commissionRate,
+                commissionAmount = commissionAmount,
+                settlementAmount = itemTotalAmount - commissionAmount,
+                status = SellerOrderStatus.RESERVED
+            )
 
-        // 5단계: 이벤트 발행
-        val events = savedOrders.map { order ->
-            val payloadJson = objectMapper.writeValueAsString(
-                OrderReservedPayload(
-                    orderId = order.id,
-                    userId = order.userId,
-                    productId = order.productId,
-                    sellerId = order.sellerId,
-                    totalAmount = order.totalAmount,
-                    quantity = order.quantity,
-                    reservationId = order.reservationId!!,
-                    expiresAt = order.expiresAt,
-                    createdAt = order.createdAt,
+            items.forEach {
+                sellerOrder.addItem(
+                    OrderItem(
+                        sellerOrder = sellerOrder,
+                        productId = it.productId,
+                        productName = it.productName,
+                        quantity = it.quantity,
+                        unitPrice = it.unitPrice,
+                        totalAmount = it.totalAmount,
+                        reservationId = it.reservationId
+                    )
                 )
-            )
+            }
 
-            OutboxEvent(
-                aggregateType = OrdersStatus.ORDER.toString(),
-                aggregateId = order.id,
-                eventType = OrdersStatus.ORDER_RESERVED.toString(),
-                payload = payloadJson,
-                status = OutboxStatus.PENDING
-            )
+            order.addSellerOrder(sellerOrder)
         }
 
-        outboxEventService.record(events)
-        logger.info { "주문 처리 완료 - 결제 서비스로 전송: ${savedOrders.size}건" }
+        order.recomputeTotals()
+        ordersRepository.save(order)
+        recordOrderReserved(order)
 
-        return savedOrders.map { it.id.toString() }
+        logger.info { "다판매자 주문 생성 완료: orderId=${order.id}, sellerOrders=${order.sellerOrders.size}, failedItems=${failedItems.size}" }
+        return OrderResponse.from(order).copy(failedItems = failedItems)
     }
 
     @Transactional
@@ -135,37 +165,47 @@ class OrdersService(
                 logger.info { "이미 확인된 주문입니다: orderId=${order.id}" }
                 return@executeIdempotent
             }
-
             if (order.status != OrdersStatus.ORDER_RESERVED) {
                 logger.error { "잘못된 주문 상태: orderId=${order.id}, status=${order.status}" }
                 return@executeIdempotent
             }
 
-            val reservationId = order.reservationId ?: run {
-                logger.error { "예약 ID가 없습니다: orderId=${order.id}" }
-                return@executeIdempotent
+            order.sellerOrders.forEach { sellerOrder ->
+                sellerOrder.items.forEach { item ->
+                    inventoryReservationService.commit(item.productId.toString(), item.reservationId, item.quantity)
+                }
+                sellerOrder.confirm()
             }
-
-            inventoryReservationService.commit(order.productId.toString(), reservationId)
-            order.status = OrdersStatus.ORDER_CONFIRMED
+            order.recomputeStatus()
             ordersRepository.save(order)
 
             val confirmedPayload = OrderConfirmedPayload(
                 orderId = order.id,
                 userId = order.userId,
-                totalAmount = order.totalAmount,
+                totalAmount = order.totalPaymentAmount,
+                sellerOrders = order.sellerOrders.map {
+                    OrderConfirmedSellerPayload(
+                        sellerOrderId = it.id,
+                        sellerId = it.sellerId,
+                        paymentAmount = it.paymentAmount
+                    )
+                },
                 confirmedAt = Instant.now()
             )
 
-            outboxEventService.record(listOf(OutboxEvent(
-                aggregateType = OrdersStatus.ORDER.toString(),
-                aggregateId = order.id,
-                eventType = OrdersStatus.ORDER_CONFIRMED.toString(),
-                payload = objectMapper.writeValueAsString(confirmedPayload),
-                status = OutboxStatus.PENDING
-            )))
+            outboxEventService.record(
+                listOf(
+                    OutboxEvent(
+                        aggregateType = OrdersStatus.ORDER.toString(),
+                        aggregateId = order.id,
+                        eventType = OrdersStatus.ORDER_CONFIRMED.toString(),
+                        payload = objectMapper.writeValueAsString(confirmedPayload),
+                        status = OutboxStatus.PENDING
+                    )
+                )
+            )
 
-            logger.info { "주문 확정 완료 -> 배송 서비스로 전송: orderId=${order.id}" }
+            logger.info { "주문 확정 완료: orderId=${order.id}" }
         }
     }
 
@@ -176,6 +216,25 @@ class OrdersService(
             orderCancelService.cancel(payload.orderId, "결제 실패")
         }
     }
+
+    @Transactional(readOnly = true)
+    fun getOrder(orderId: UUID, userId: UUID): Orders {
+        val order = ordersRepository.findById(orderId).orElseThrow { OrderNotFoundException(orderId) }
+        if (order.userId != userId) throw OrderForbiddenException(orderId)
+        return order
+    }
+
+    @Transactional(readOnly = true)
+    fun getMyOrders(userId: UUID): List<Orders> =
+        ordersRepository.findByUserIdOrderByCreatedAtDesc(userId)
+
+    @Transactional(readOnly = true)
+    fun getOrdersByUserId(userId: UUID): List<Orders> =
+        ordersRepository.findByUserIdOrderByCreatedAtDesc(userId)
+
+    @Transactional(readOnly = true)
+    fun getSellerOrders(sellerId: UUID) =
+        sellerOrderRepository.findBySellerIdOrderByCreatedAtDesc(sellerId)
 
     fun cancelOrder(orderId: UUID, userId: UUID): Boolean {
         val order = ordersRepository.findById(orderId).orElse(null)
@@ -188,4 +247,70 @@ class OrdersService(
 
         return orderCancelService.cancel(orderId, "사용자 요청")
     }
+
+    fun cancelSellerOrder(orderId: UUID, sellerOrderId: UUID, userId: UUID): Boolean {
+        val order = ordersRepository.findById(orderId).orElse(null)
+            ?: throw OrderNotFoundException(orderId)
+        if (order.userId != userId) throw OrderForbiddenException(orderId)
+        return orderCancelService.cancelSellerOrder(orderId, sellerOrderId, "사용자 요청")
+    }
+
+    private fun recordOrderReserved(order: Orders) {
+        val payload = OrderReservedPayload(
+            orderId = order.id,
+            userId = order.userId,
+            totalItemAmount = order.totalItemAmount,
+            totalDeliveryFee = order.totalDeliveryFee,
+            totalPaymentAmount = order.totalPaymentAmount,
+            totalCommissionAmount = order.totalCommissionAmount,
+            totalSettlementAmount = order.totalSettlementAmount,
+            sellerOrders = order.sellerOrders.map { sellerOrder ->
+                OrderReservedSellerPayload(
+                    sellerOrderId = sellerOrder.id,
+                    sellerId = sellerOrder.sellerId,
+                    itemTotalAmount = sellerOrder.itemTotalAmount,
+                    deliveryFee = sellerOrder.deliveryFee,
+                    paymentAmount = sellerOrder.paymentAmount,
+                    commissionRate = sellerOrder.commissionRate,
+                    commissionAmount = sellerOrder.commissionAmount,
+                    settlementAmount = sellerOrder.settlementAmount,
+                    items = sellerOrder.items.map { item ->
+                        OrderReservedItemPayload(
+                            orderItemId = item.id,
+                            productId = item.productId,
+                            productName = item.productName,
+                            quantity = item.quantity,
+                            unitPrice = item.unitPrice,
+                            totalAmount = item.totalAmount,
+                            reservationId = item.reservationId
+                        )
+                    }
+                )
+            },
+            expiresAt = order.expiresAt,
+            createdAt = order.createdAt
+        )
+
+        outboxEventService.record(
+            listOf(
+                OutboxEvent(
+                    aggregateType = OrdersStatus.ORDER.toString(),
+                    aggregateId = order.id,
+                    eventType = OrdersStatus.ORDER_RESERVED.toString(),
+                    payload = objectMapper.writeValueAsString(payload),
+                    status = OutboxStatus.PENDING
+                )
+            )
+        )
+    }
 }
+
+private data class ReservedItem(
+    val productId: UUID,
+    val productName: String,
+    val sellerId: UUID,
+    val quantity: Int,
+    val unitPrice: Long,
+    val totalAmount: Long,
+    val reservationId: UUID
+)

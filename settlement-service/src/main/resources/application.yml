@@ -2,15 +2,13 @@ server:
   port: 8087
 
 spring:
-  profiles:
-    default: dev
   application:
     name: settlement-service
 
   datasource:
     url: jdbc:postgresql://localhost:5432/settlement_service
-    username: postgres
-    password: postgres
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -32,6 +30,17 @@ spring:
       group-id: settlement-service-group
       auto-offset-reset: earliest
 
+  data:
+    redis:
+      cluster:
+        nodes:
+          - localhost:7001
+          - localhost:7002
+          - localhost:7003
+          - localhost:7004
+          - localhost:7005
+          - localhost:7006
+
   batch:
     jdbc:
       initialize-schema: always
@@ -45,21 +54,12 @@ settlement:
   platform-fee-rate: 0.10
   batch-cron: "0 0 0 * * *"
 
+outbox:
+  publisher:
+    enabled: false
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info
-
----
-spring:
-  config:
-    activate:
-      on-profile: docker
-  datasource:
-    url: jdbc:postgresql://postgres:5432/settlement_service
-  kafka:
-    bootstrap-servers: kafka:9092
-
-jwt:
-  secret: ${JWT_SECRET}

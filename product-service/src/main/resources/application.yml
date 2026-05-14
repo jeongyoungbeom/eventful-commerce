@@ -2,15 +2,18 @@ server:
   port: 8086
 
 spring:
-  profiles:
-    default: dev
   application:
     name: product-service
 
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 500MB
+
   datasource:
     url: jdbc:postgresql://localhost:5432/product_service
-    username: postgres
-    password: postgres
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -33,21 +36,12 @@ outbox:
 jwt:
   secret: ${JWT_SECRET:}
 
+image:
+  upload-dir: ./uploads/images
+  base-url: http://localhost/images
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info
-
----
-spring:
-  config:
-    activate:
-      on-profile: docker
-  datasource:
-    url: jdbc:postgresql://postgres:5432/product_service
-  kafka:
-    bootstrap-servers: kafka:9092
-
-jwt:
-  secret: ${JWT_SECRET}

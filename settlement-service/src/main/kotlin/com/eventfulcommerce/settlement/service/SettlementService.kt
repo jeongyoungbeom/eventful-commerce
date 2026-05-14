@@ -8,38 +8,46 @@ import com.eventfulcommerce.settlement.dto.SettlementSummaryResponse
 import com.eventfulcommerce.settlement.exception.SettlementNotFoundException
 import com.eventfulcommerce.settlement.repository.SettlementRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.redisson.api.RedissonClient
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 private val logger = KotlinLogging.logger {}
 
 @Service
 class SettlementService(
     private val settlementRepository: SettlementRepository,
-    private val settlementConfig: SettlementConfig
+    private val settlementConfig: SettlementConfig,
+    private val settlementPayExecutor: SettlementPayExecutor,
+    private val redissonClient: RedissonClient
 ) {
     @Transactional
     fun createSettlement(
         paymentId: UUID,
         orderId: UUID,
+        sellerOrderId: UUID,
         sellerId: UUID,
         userId: UUID,
-        totalAmount: Long
+        totalAmount: Long,
+        platformFee: Long,
+        sellerAmount: Long
     ): Settlement {
-        settlementRepository.findByPaymentId(paymentId)?.let {
-            logger.info { "이미 처리된 결제 정산: paymentId=$paymentId" }
+        settlementRepository.findBySellerOrderId(sellerOrderId)?.let {
+            logger.info { "이미 처리된 판매자 주문 정산: sellerOrderId=$sellerOrderId" }
             return it
         }
 
         val settlement = Settlement(
             paymentId = paymentId,
             orderId = orderId,
+            sellerOrderId = sellerOrderId,
             sellerId = sellerId,
             userId = userId,
             totalAmount = totalAmount,
-            platformFee = settlementConfig.calculatePlatformFee(totalAmount),
-            sellerAmount = settlementConfig.calculateSellerAmount(totalAmount)
+            platformFee = platformFee,
+            sellerAmount = sellerAmount
         )
 
         val saved = settlementRepository.save(settlement)
@@ -48,12 +56,33 @@ class SettlementService(
     }
 
     @Transactional
+    fun applyRefund(sellerOrderId: UUID, refundAmount: Long) {
+        val settlement = settlementRepository.findBySellerOrderId(sellerOrderId) ?: run {
+            logger.warn { "환불 대상 정산 없음: sellerOrderId=$sellerOrderId" }
+            return
+        }
+
+        val refundPlatformFee = settlementConfig.calculatePlatformFee(refundAmount)
+        val refundSellerAmount = settlementConfig.calculateSellerAmount(refundAmount)
+        settlement.applyRefund(refundAmount, refundPlatformFee, refundSellerAmount)
+        logger.info { "정산 환불 차감 완료: sellerOrderId=$sellerOrderId, refundAmount=$refundAmount" }
+    }
+
     fun pay(settlementId: UUID): SettlementResponse {
-        val settlement = settlementRepository.findById(settlementId)
-            .orElseThrow { SettlementNotFoundException(settlementId) }
-        settlement.pay()
-        logger.info { "정산 지급 완료: settlementId=$settlementId, sellerId=${settlement.sellerId}" }
-        return SettlementResponse.from(settlement)
+        val lock = redissonClient.getLock("settlement:pay:$settlementId")
+
+        if (!lock.tryLock(5, 10, TimeUnit.SECONDS)) {
+            logger.warn { "정산 지급 락 획득 실패: settlementId=$settlementId" }
+            throw IllegalStateException("현재 처리 중인 요청이 있습니다. 잠시 후 다시 시도해주세요.")
+        }
+
+        return try {
+            logger.info { "정산 지급 락 획득: settlementId=$settlementId" }
+            settlementPayExecutor.execute(settlementId)
+        } finally {
+            lock.unlock()
+            logger.info { "정산 지급 락 해제: settlementId=$settlementId" }
+        }
     }
 
     @Transactional(readOnly = true)

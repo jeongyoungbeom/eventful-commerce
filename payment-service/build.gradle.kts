@@ -18,6 +18,7 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     implementation("org.springframework.kafka:spring-kafka")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
 //    implementation("org.flywaydb:flyway-core")
 

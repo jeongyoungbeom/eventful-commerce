@@ -37,17 +37,28 @@ class PaymentEventsConsumer(
 
     private fun handlePaymentCompleted(eventMessage: OutboxEventMessage) {
         val payload = objectMapper.readValue(eventMessage.payload, PaymentCompletedPayload::class.java)
-        
-        val (title, message) = NotificationTemplate.paymentCompleted(payload.orderId, payload.amount)
-        
+
+        // 구매자 알림
+        val (buyerTitle, buyerMessage) = NotificationTemplate.paymentCompleted(payload.orderId, payload.amount)
         notificationService.createAndSend(
             userId = payload.userId,
             type = NotificationType.PAYMENT_COMPLETED,
-            title = title,
-            message = message,
+            title = buyerTitle,
+            message = buyerMessage,
             orderId = payload.orderId
         )
-        
+
+        payload.sellerOrders.forEach { sellerOrder ->
+            val (sellerTitle, sellerMessage) = NotificationTemplate.sellerPaymentReceived(payload.orderId, sellerOrder.paymentAmount)
+            notificationService.createAndSend(
+                userId = sellerOrder.sellerId,
+                type = NotificationType.PAYMENT_COMPLETED,
+                title = sellerTitle,
+                message = sellerMessage,
+                orderId = payload.orderId
+            )
+        }
+
         logger.info { "✅ PAYMENT_COMPLETED 알림 처리 완료: orderId=${payload.orderId}" }
     }
 }

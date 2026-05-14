@@ -1,7 +1,6 @@
 package com.eventfulcommerce.user.service
 
 import com.eventfulcommerce.user.exception.InvalidTokenException
-import com.eventfulcommerce.user.exception.UserNotFoundException
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.data.redis.core.RedisTemplate
@@ -16,6 +15,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class PasswordResetService(
     private val userService: UserService,
+    private val emailService: EmailService,
     private val redisTemplate: RedisTemplate<String, String>,
     private val passwordEncoder: PasswordEncoder,
     private val auditLogService: AuditLogService
@@ -27,31 +27,22 @@ class PasswordResetService(
     }
     
     /**
-     * 비밀번호 재설정 토큰 생성
+     * 비밀번호 재설정 토큰 생성 및 이메일 전송
+     * 계정 열거 공격 방지: 이메일이 존재하지 않아도 동일한 응답 반환
      */
-    fun createResetToken(email: String): String {
-        // User 존재 확인
+    fun sendResetEmail(email: String) {
         val user = userService.findByEmail(email)
-            ?: throw UserNotFoundException(email)
-        
-        // 토큰 생성 (UUID)
+        if (user == null) {
+            logger.warn { "비밀번호 재설정 요청: 존재하지 않는 이메일 email=$email" }
+            return
+        }
+
         val resetToken = UUID.randomUUID().toString()
-        
-        // Redis에 저장: token -> userId
         val key = RESET_TOKEN_PREFIX + resetToken
-        redisTemplate.opsForValue().set(
-            key,
-            user.id.toString(),
-            TOKEN_VALIDITY_MINUTES,
-            TimeUnit.MINUTES
-        )
-        
-        logger.info { "🔑 비밀번호 재설정 토큰 생성: email=$email, token=$resetToken" }
-        
-        // TODO: 이메일로 토큰 전송 (Email Service 연동 필요)
-        // emailService.sendPasswordResetEmail(email, resetToken)
-        
-        return resetToken
+        redisTemplate.opsForValue().set(key, user.id.toString(), TOKEN_VALIDITY_MINUTES, TimeUnit.MINUTES)
+
+        logger.info { "비밀번호 재설정 토큰 생성: email=$email" }
+        emailService.sendPasswordResetEmail(email, resetToken)
     }
     
     /**

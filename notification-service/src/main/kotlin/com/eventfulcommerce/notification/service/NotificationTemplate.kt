@@ -68,10 +68,53 @@ object NotificationTemplate {
 
 상품이 배송되었습니다. 리뷰를 남겨주세요!
         """.trimIndent()
-        
+
         return title to message
     }
-    
+
+    // ── 판매자용 ──────────────────────────────────────────────────
+
+    fun sellerOrderReceived(orderId: UUID, amount: Long, quantity: Int): Pair<String, String> {
+        val title = "새 주문 접수"
+        val message = """
+🛒 <b>새 주문이 들어왔습니다!</b>
+
+주문번호: <code>$orderId</code>
+주문 수량: ${quantity}개
+주문 금액: ${amount}원
+
+⏰ 결제 완료 후 배송을 준비해주세요.
+        """.trimIndent()
+
+        return title to message
+    }
+
+    fun sellerPaymentReceived(orderId: UUID, amount: Long): Pair<String, String> {
+        val title = "결제 완료 — 배송 준비 요청"
+        val message = """
+💳 <b>결제가 완료되었습니다!</b>
+
+주문번호: <code>$orderId</code>
+결제 금액: ${amount}원
+
+📦 배송을 준비해주세요.
+        """.trimIndent()
+
+        return title to message
+    }
+
+    fun sellerOrderCanceled(orderId: UUID, reason: String): Pair<String, String> {
+        val title = "주문 취소됨"
+        val message = """
+❌ <b>주문이 취소되었습니다.</b>
+
+주문번호: <code>$orderId</code>
+취소 사유: $reason
+        """.trimIndent()
+
+        return title to message
+    }
+
     private fun Int.formatAmount(): String {
         return "%,d".format(this)
     }

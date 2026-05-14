@@ -13,23 +13,28 @@ class Orders(
     val userId: UUID,
 
     @Column(nullable = false)
-    val productId: UUID,
+    var totalItemAmount: Long = 0,
 
     @Column(nullable = false)
-    val sellerId: UUID,
+    var totalDeliveryFee: Long = 0,
 
     @Column(nullable = false)
-    val quantity: Int,
+    var totalPaymentAmount: Long = 0,
 
     @Column(nullable = false)
-    val totalAmount: Long,
+    var totalCommissionAmount: Long = 0,
+
+    @Column(nullable = false)
+    var totalSettlementAmount: Long = 0,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     var status: OrdersStatus,
 
-    var reservationId: UUID? = null,
     var expiresAt: Instant? = null,
+
+    @OneToMany(mappedBy = "order", cascade = [CascadeType.ALL], orphanRemoval = true)
+    val sellerOrders: MutableList<SellerOrder> = mutableListOf(),
 
     @Version
     var version: Long = 0L
@@ -39,4 +44,26 @@ class Orders(
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID
+
+    fun addSellerOrder(sellerOrder: SellerOrder) {
+        sellerOrders.add(sellerOrder)
+    }
+
+    fun recomputeTotals() {
+        totalItemAmount = sellerOrders.sumOf { it.itemTotalAmount }
+        totalDeliveryFee = sellerOrders.sumOf { it.deliveryFee }
+        totalPaymentAmount = sellerOrders.sumOf { it.paymentAmount }
+        totalCommissionAmount = sellerOrders.sumOf { it.commissionAmount }
+        totalSettlementAmount = sellerOrders.sumOf { it.settlementAmount }
+    }
+
+    fun recomputeStatus() {
+        status = when {
+            sellerOrders.isEmpty() -> OrdersStatus.ORDER_FAILED
+            sellerOrders.all { it.status == SellerOrderStatus.CANCELED } -> OrdersStatus.ORDER_CANCELED
+            sellerOrders.any { it.status == SellerOrderStatus.CANCELED } -> OrdersStatus.ORDER_PARTIALLY_CANCELED
+            sellerOrders.all { it.status == SellerOrderStatus.CONFIRMED } -> OrdersStatus.ORDER_CONFIRMED
+            else -> OrdersStatus.ORDER_RESERVED
+        }
+    }
 }

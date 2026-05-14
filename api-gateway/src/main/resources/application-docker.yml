@@ -27,6 +27,13 @@ spring:
             filters:
               - StripPrefix=1
 
+          - id: order-service-seller-orders
+            uri: http://order-service:8081
+            predicates:
+              - Path=/api/seller-orders/**
+            filters:
+              - StripPrefix=1
+
           - id: payment-service
             uri: http://payment-service:8082
             predicates:
@@ -68,6 +75,67 @@ spring:
               - Path=/api/settlements/**
             filters:
               - StripPrefix=1
+
+          - id: docs-order-service
+            uri: http://order-service:8081
+            predicates:
+              - Path=/api-docs/order
+            filters:
+              - SetPath=/v3/api-docs
+
+          - id: docs-payment-service
+            uri: http://payment-service:8082
+            predicates:
+              - Path=/api-docs/payment
+            filters:
+              - SetPath=/v3/api-docs
+
+          - id: docs-notification-service
+            uri: http://notification-service:8084
+            predicates:
+              - Path=/api-docs/notification
+            filters:
+              - SetPath=/v3/api-docs
+
+          - id: docs-user-service
+            uri: http://user-service:8085
+            predicates:
+              - Path=/api-docs/user
+            filters:
+              - SetPath=/v3/api-docs
+
+          - id: docs-product-service
+            uri: http://product-service:8086
+            predicates:
+              - Path=/api-docs/product
+            filters:
+              - SetPath=/v3/api-docs
+
+          - id: docs-settlement-service
+            uri: http://settlement-service:8087
+            predicates:
+              - Path=/api-docs/settlement
+            filters:
+              - SetPath=/v3/api-docs
+
+springdoc:
+  swagger-ui:
+    urls:
+      - name: User Service
+        url: /api-docs/user
+      - name: Product Service
+        url: /api-docs/product
+      - name: Order Service
+        url: /api-docs/order
+      - name: Payment Service
+        url: /api-docs/payment
+      - name: Settlement Service
+        url: /api-docs/settlement
+      - name: Notification Service
+        url: /api-docs/notification
+
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
 jwt:
   secret: ${JWT_SECRET}

@@ -1,11 +1,11 @@
 package com.eventfulcommerce.order.service
 
-import com.eventfulcommerce.common.OrderCanceledPayload
-import com.eventfulcommerce.common.OutboxEvent
-import com.eventfulcommerce.common.OutboxEventService
-import com.eventfulcommerce.common.OutboxStatus
+import com.eventfulcommerce.common.*
 import com.eventfulcommerce.order.domain.OrdersStatus
+import com.eventfulcommerce.order.domain.entity.SellerOrder
+import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
 import com.eventfulcommerce.order.repository.OrdersRepository
+import com.eventfulcommerce.order.repository.SellerOrderRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
@@ -14,69 +14,113 @@ import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
 
-/**
- * 주문 취소 실행자 (트랜잭션 전담)
- * 
- * OrderCancelService와 분리하여 
- * Spring AOP 프록시가 제대로 작동하도록 함
- */
 @Service
 class OrderCancelExecutor(
     private val ordersRepository: OrdersRepository,
+    private val sellerOrderRepository: SellerOrderRepository,
     private val inventoryReservationService: InventoryReservationService,
     private val outboxEventService: OutboxEventService,
     private val objectMapper: ObjectMapper
 ) {
 
-    /**
-     * 실제 취소 로직 (트랜잭션 적용)
-     */
     @Transactional
     fun execute(orderId: UUID, reason: String): Boolean {
-        // 1. 주문 조회
-        val order = ordersRepository.findById(orderId).orElse(null)
-        if (order == null) {
+        val order = ordersRepository.findById(orderId).orElse(null) ?: run {
             logger.warn { "주문을 찾을 수 없음: orderId=$orderId" }
             return false
         }
-        
-        // 2. 상태 확인 - 예약 상태만 취소 가능
-        if (order.status != OrdersStatus.ORDER_RESERVED) {
-            logger.info { "취소 불가능한 주문 상태: orderId=$orderId, status=${order.status}" }
+
+        val targets = order.sellerOrders.filter { it.status != SellerOrderStatus.CANCELED }
+        if (targets.isEmpty()) {
+            logger.info { "취소 가능한 판매자 주문 없음: orderId=$orderId" }
             return false
         }
-        
-        // 3. 재고 해제
-        val reservationId = order.reservationId
-        if (reservationId != null) {
-            logger.info { "재고 해제: orderId=$orderId, reservationId=$reservationId" }
-            inventoryReservationService.release(order.productId.toString(), reservationId)
-        } else {
-            logger.warn { "예약 ID가 없습니다: orderId=$orderId" }
-        }
-        
-        // 4. 주문 상태 변경
-        order.status = OrdersStatus.ORDER_CANCELED
-        ordersRepository.save(order)
 
-        // 5. ORDER_CANCELED 이벤트 발행
+        cancelTargets(orderId, targets, reason)
+        order.recomputeStatus()
+        ordersRepository.save(order)
+        recordCanceled(orderId, order.userId, targets, reason)
+
+        logger.info { "주문 취소 완료: orderId=$orderId, reason=$reason" }
+        return true
+    }
+
+    @Transactional
+    fun executeSellerOrder(orderId: UUID, sellerOrderId: UUID, reason: String): Boolean {
+        val order = ordersRepository.findById(orderId).orElse(null) ?: run {
+            logger.warn { "주문을 찾을 수 없음: orderId=$orderId" }
+            return false
+        }
+        val sellerOrder = sellerOrderRepository.findById(sellerOrderId).orElse(null) ?: run {
+            logger.warn { "판매자 주문을 찾을 수 없음: sellerOrderId=$sellerOrderId" }
+            return false
+        }
+        if (sellerOrder.order.id != orderId || sellerOrder.status == SellerOrderStatus.CANCELED) {
+            logger.info { "취소 불가능한 판매자 주문: sellerOrderId=$sellerOrderId, status=${sellerOrder.status}" }
+            return false
+        }
+
+        cancelTargets(orderId, listOf(sellerOrder), reason)
+        order.recomputeStatus()
+        ordersRepository.save(order)
+        recordCanceled(orderId, order.userId, listOf(sellerOrder), reason)
+
+        logger.info { "판매자 주문 취소 완료: orderId=$orderId, sellerOrderId=$sellerOrderId, reason=$reason" }
+        return true
+    }
+
+    private fun cancelTargets(orderId: UUID, targets: List<SellerOrder>, reason: String) {
+        targets.forEach { sellerOrder ->
+            when (sellerOrder.status) {
+                SellerOrderStatus.RESERVED -> {
+                    sellerOrder.items.forEach { item ->
+                        inventoryReservationService.release(item.productId.toString(), item.reservationId, item.quantity)
+                    }
+                }
+                SellerOrderStatus.CONFIRMED -> {
+                    sellerOrder.items.forEach { item ->
+                        inventoryReservationService.adjustStock(item.productId.toString(), item.quantity)
+                    }
+                }
+                SellerOrderStatus.CANCELED -> Unit
+            }
+            sellerOrder.cancel()
+        }
+        logger.info { "취소 대상 처리 완료: orderId=$orderId, count=${targets.size}, reason=$reason" }
+    }
+
+    private fun recordCanceled(orderId: UUID, userId: UUID, targets: List<SellerOrder>, reason: String) {
         val payload = OrderCanceledPayload(
             orderId = orderId,
-            userId = order.userId,
-            reason = reason
+            userId = userId,
+            reason = reason,
+            canceledSellerOrders = targets.map { sellerOrder ->
+                OrderCanceledSellerPayload(
+                    sellerOrderId = sellerOrder.id,
+                    sellerId = sellerOrder.sellerId,
+                    refundAmount = sellerOrder.paymentAmount,
+                    items = sellerOrder.items.map {
+                        OrderCanceledItemPayload(
+                            orderItemId = it.id,
+                            productId = it.productId,
+                            quantity = it.quantity,
+                            amount = it.totalAmount
+                        )
+                    }
+                )
+            }
         )
 
-        val outboxEvent = OutboxEvent(
-            aggregateType = OrdersStatus.ORDER_CANCELED.toString(),
-            aggregateId = orderId,
-            eventType = "ORDER_CANCELED",
-            payload = objectMapper.writeValueAsString(payload),
-            status = OutboxStatus.PENDING
+        outboxEventService.record(
+            listOf(
+                OutboxEvent(
+                    aggregateType = OrdersStatus.ORDER_CANCELED.toString(),
+                    aggregateId = orderId,
+                    eventType = "ORDER_CANCELED",
+                    payload = objectMapper.writeValueAsString(payload),
+                    status = OutboxStatus.PENDING
+                )
+            )
         )
-
-        outboxEventService.record(listOf(outboxEvent))
-        
-        logger.info { "✅ 주문 취소 완료: orderId=$orderId, reason=$reason" }
-        return true
     }
 }

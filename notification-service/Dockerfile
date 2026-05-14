@@ -20,5 +20,4 @@ COPY --from=build /app/notification-service/build/libs/*.jar app.jar
 # Expose port
 EXPOSE 8084
 
-# The active Spring profile is provided by docker-compose via SPRING_PROFILES_ACTIVE.
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Dspring.profiles.active=docker", "-jar", "app.jar"]

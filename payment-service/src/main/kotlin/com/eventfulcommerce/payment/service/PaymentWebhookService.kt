@@ -3,6 +3,7 @@ package com.eventfulcommerce.payment.service
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.common.PaymentCompletedPayload
+import com.eventfulcommerce.common.PaymentCompletedSellerPayload
 import com.eventfulcommerce.common.PaymentFailedPayload
 import com.eventfulcommerce.common.repository.OutboxEventRepository
 import com.eventfulcommerce.payment.domain.PaymentStatus
@@ -28,7 +29,7 @@ class PaymentWebhookService(
         val payment = (paymentRepository.findByOrderId(request.orderId)
             ?: throw IllegalArgumentException("결제 정보를 찾을 수 없습니다: orderId= ${request.orderId}"))
 
-        if (payment.status == PaymentStatus.PAYMENT_COMPLETED || payment.status == PaymentStatus.PAYMENT_FAILED) return
+        if (payment.status != PaymentStatus.PAYMENT_RESERVED) return
 
         if (request.result == "SUCCESS") {
             successPayment(payment)
@@ -43,9 +44,8 @@ class PaymentWebhookService(
             paymentId = payment.id,
             orderId = payment.orderId,
             userId = payment.userId,
-            sellerId = payment.sellerId,
             amount = payment.amount,
-            reservationId = payment.reservationId,
+            sellerOrders = objectMapper.readValue(payment.sellerOrdersJson, Array<PaymentCompletedSellerPayload>::class.java).toList(),
             completedAt = Instant.now()
         )
         val outboxEventPayload = objectMapper.writeValueAsString(paymentPayload)
@@ -73,8 +73,6 @@ class PaymentWebhookService(
             paymentId = payment.id,
             orderId = payment.orderId,
             amount = payment.amount,
-            reservationId = payment.reservationId
-                ?: throw IllegalArgumentException("reservationId가 없습니다: paymentId=${payment.id}"),
             failedAt = Instant.now(),
             pgTxId = request.pgTxId ?: ""
         )

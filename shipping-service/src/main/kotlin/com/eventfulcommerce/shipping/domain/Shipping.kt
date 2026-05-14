@@ -10,6 +10,9 @@ class Shipping(
     @Column(name = "order_id", nullable = false)
     val orderId: UUID,
 
+    @Column(name = "seller_order_id")
+    val sellerOrderId: UUID? = null,
+
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
 

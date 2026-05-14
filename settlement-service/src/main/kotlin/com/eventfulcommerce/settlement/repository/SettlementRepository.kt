@@ -10,7 +10,8 @@ import java.util.UUID
 
 interface SettlementRepository : JpaRepository<Settlement, UUID> {
     fun existsByPaymentId(paymentId: UUID): Boolean
-    fun findByPaymentId(paymentId: UUID): Settlement?
+    fun findByPaymentId(paymentId: UUID): List<Settlement>
+    fun findBySellerOrderId(sellerOrderId: UUID): Settlement?
     fun findBySellerIdOrderByCreatedAtDesc(sellerId: UUID): List<Settlement>
     fun findBySellerIdAndStatusOrderByCreatedAtDesc(sellerId: UUID, status: SettlementStatus): List<Settlement>
     fun findByStatusAndCreatedAtBefore(status: SettlementStatus, before: Instant): List<Settlement>

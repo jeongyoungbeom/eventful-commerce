@@ -31,13 +31,6 @@ class UserService(
     }
     
     /**
-     * User 존재 여부 확인
-     */
-    fun existsById(userId: UUID): Boolean {
-        return userRepository.existsById(userId)
-    }
-    
-    /**
      * 이메일 중복 확인
      */
     fun existsByEmail(email: String): Boolean {

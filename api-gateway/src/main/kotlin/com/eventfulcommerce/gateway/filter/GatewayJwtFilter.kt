@@ -8,6 +8,9 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.authority.SimpleGrantedAuthority
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 
@@ -30,7 +33,11 @@ class GatewayJwtFilter(
             "/api/auth/password",
             "/api/auth/email",
             "/api/payments/webhook",
-            "/actuator"
+            "/actuator",
+            "/swagger-ui",
+            "/swagger-ui.html",
+            "/v3/api-docs",
+            "/api-docs"
         )
     }
 
@@ -39,6 +46,12 @@ class GatewayJwtFilter(
         response: HttpServletResponse,
         filterChain: FilterChain
     ) {
+        // CORS preflight는 JWT 없이 통과
+        if (request.method == "OPTIONS") {
+            filterChain.doFilter(request, response)
+            return
+        }
+
         if (isPublicPath(request)) {
             filterChain.doFilter(request, response)
             return
@@ -67,6 +80,14 @@ class GatewayJwtFilter(
 
         val userId = jwtTokenProvider.getUserId(token)
         val role = jwtTokenProvider.getRole(token)
+
+        // Spring Security 컨텍스트에 인증 정보 등록 → SecurityConfig의 authenticated() 체크가 동작함
+        val authentication = UsernamePasswordAuthenticationToken(
+            userId.toString(),
+            null,
+            listOf(SimpleGrantedAuthority("ROLE_${role.name}"))
+        )
+        SecurityContextHolder.getContext().authentication = authentication
 
         val mutatedRequest = MutableHttpServletRequest(request)
         mutatedRequest.addHeader("X-User-Id", userId.toString())

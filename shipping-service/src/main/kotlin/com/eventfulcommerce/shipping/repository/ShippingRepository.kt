@@ -6,4 +6,5 @@ import java.util.UUID
 
 interface ShippingRepository : JpaRepository<Shipping, UUID> {
     fun existsByOrderId(id: UUID): Boolean
+    fun existsBySellerOrderId(id: UUID): Boolean
 }

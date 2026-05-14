@@ -7,6 +7,7 @@ import com.eventfulcommerce.shipping.domain.ShippingStatus
 import com.eventfulcommerce.shipping.repository.ShippingRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
@@ -22,7 +23,8 @@ class ShippingService(
     private val processedEventRepository: ProcessedEventRepository,
     private val shippingRepository: ShippingRepository,
     private val outboxEventService: OutboxEventService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    @Value("\${shipping.completion-delay-ms}") private val completionDelayMs: Long
 ) {
 
     /**
@@ -40,29 +42,26 @@ class ShippingService(
 
         val payload = objectMapper.readValue(payloadJson, OrderConfirmedPayload::class.java)
 
-        // 중복 배송 체크
-        if (shippingRepository.existsByOrderId(payload.orderId)) {
-            logger.warn { "이미 배송이 생성됨: orderId=${payload.orderId}" }
-            return
+        payload.sellerOrders.forEach { sellerOrder ->
+            if (shippingRepository.existsBySellerOrderId(sellerOrder.sellerOrderId)) {
+                logger.warn { "이미 배송이 생성됨: sellerOrderId=${sellerOrder.sellerOrderId}" }
+                return@forEach
+            }
+
+            val trackingNumber = generateTrackingNumber()
+            val shipping = Shipping(
+                orderId = payload.orderId,
+                sellerOrderId = sellerOrder.sellerOrderId,
+                userId = payload.userId,
+                status = ShippingStatus.PREPARING,
+                trackingNumber = trackingNumber
+            )
+            shippingRepository.save(shipping)
+
+            logger.info { "배송 생성: orderId=${payload.orderId}, sellerOrderId=${sellerOrder.sellerOrderId}, trackingNumber=$trackingNumber" }
+            startShipping(shipping.id)
+            completeShippingAsync(shipping.id)
         }
-
-        // 1. 배송 생성 (PREPARING)
-        val trackingNumber = generateTrackingNumber()
-        val shipping = Shipping(
-            orderId = payload.orderId,
-            userId = payload.userId,
-            status = ShippingStatus.PREPARING,
-            trackingNumber = trackingNumber
-        )
-        shippingRepository.save(shipping)
-        
-        logger.info { "📦 배송 생성: orderId=${payload.orderId}, trackingNumber=$trackingNumber" }
-
-        // 2. 즉시 배송 시작
-        startShipping(shipping.id)
-
-        // 3. 비동기로 10초 후 배송 완료
-        completeShippingAsync(shipping.id)
     }
 
     /**
@@ -106,8 +105,7 @@ class ShippingService(
     @Async
     fun completeShippingAsync(shippingId: UUID) {
         try {
-            // 10초 대기
-            Thread.sleep(10000)
+            Thread.sleep(completionDelayMs)
             completeShipping(shippingId)
         } catch (e: Exception) {
             logger.error(e) { "배송 완료 처리 실패: shippingId=$shippingId" }

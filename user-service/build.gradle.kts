@@ -30,6 +30,10 @@ dependencies {
     // Kafka
     implementation("org.springframework.kafka:spring-kafka")
     
+    // Mail
+    implementation("org.springframework.boot:spring-boot-starter-mail")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
+
     // Logging
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
     

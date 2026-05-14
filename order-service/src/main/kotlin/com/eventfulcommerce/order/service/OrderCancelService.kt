@@ -43,8 +43,7 @@ class OrderCancelService(
             
             try {
                 logger.info { "🔒 주문 취소 락 획득: orderId=$orderId, reason=$reason" }
-                
-                // 다른 클래스(OrderCancelExecutor) 호출 → Spring AOP 프록시 작동! ✅
+
                 orderCancelExecutor.execute(orderId, reason)
                 
             } finally {
@@ -54,6 +53,27 @@ class OrderCancelService(
         } catch (e: Exception) {
             logger.error(e) { "❌ 주문 취소 처리 중 에러: orderId=$orderId, reason=$reason" }
             false
+        }
+    }
+
+    fun cancelSellerOrder(orderId: UUID, sellerOrderId: UUID, reason: String): Boolean {
+        val lock = redissonClient.getLock("order:cancel:$orderId")
+
+        return try {
+            if (!lock.tryLock(5, 10, TimeUnit.SECONDS)) {
+                logger.warn { "주문 취소 락 획득 실패: orderId=$orderId" }
+                return false
+            }
+            orderCancelExecutor.executeSellerOrder(orderId, sellerOrderId, reason)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            logger.error(e) { "주문 취소 중 인터럽트 발생: orderId=$orderId" }
+            false
+        } finally {
+            if (lock.isHeldByCurrentThread) {
+                lock.unlock()
+                logger.info { "주문 취소 락 해제: orderId=$orderId" }
+            }
         }
     }
 }

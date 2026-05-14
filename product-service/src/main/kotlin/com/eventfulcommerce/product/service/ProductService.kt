@@ -7,6 +7,7 @@ import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
 import com.eventfulcommerce.common.ProductStockUpdatedPayload
 import com.eventfulcommerce.product.domain.ProductCategory
+import com.eventfulcommerce.product.domain.ProductLabel
 import com.eventfulcommerce.product.domain.ProductStatus
 import com.eventfulcommerce.product.domain.entity.Product
 import com.eventfulcommerce.product.dto.CreateProductRequest
@@ -19,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
@@ -27,10 +29,11 @@ private val logger = KotlinLogging.logger {}
 class ProductService(
     private val productRepository: ProductRepository,
     private val outboxEventService: OutboxEventService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val imageStorageService: ImageStorageService
 ) {
     @Transactional
-    fun createProduct(request: CreateProductRequest, sellerId: UUID): ProductResponse {
+    fun createProduct(request: CreateProductRequest, sellerId: UUID, images: List<MultipartFile>?): ProductResponse {
         val product = Product(
             sellerId = sellerId,
             name = request.name,
@@ -38,7 +41,10 @@ class ProductService(
             price = request.price,
             stock = request.stock,
             category = request.category
-        )
+        ).also {
+            it.labels = request.labels.toMutableSet()
+            it.imageUrls = images?.map { file -> imageStorageService.save(file) }?.toMutableList() ?: mutableListOf()
+        }
         val saved = productRepository.save(product)
 
         val payload = ProductRegisteredPayload(
@@ -63,9 +69,13 @@ class ProductService(
     }
 
     @Transactional
-    fun updateProduct(productId: UUID, request: UpdateProductRequest, sellerId: UUID): ProductResponse {
+    fun updateProduct(productId: UUID, request: UpdateProductRequest, sellerId: UUID, images: List<MultipartFile>?): ProductResponse {
         val product = getOwnedProduct(productId, sellerId)
-        product.update(request.name, request.description, request.price, request.category)
+        val newImageUrls = images?.let { files ->
+            product.imageUrls.forEach { imageStorageService.deleteByUrl(it) }
+            files.map { imageStorageService.save(it) }
+        }
+        product.update(request.name, request.description, request.price, request.category, request.labels, newImageUrls)
         return ProductResponse.from(product)
     }
 
@@ -110,11 +120,12 @@ class ProductService(
     }
 
     @Transactional(readOnly = true)
-    fun getProducts(category: ProductCategory?): List<ProductResponse> {
-        val products = if (category != null) {
-            productRepository.findByStatusAndCategory(ProductStatus.ACTIVE, category)
-        } else {
-            productRepository.findByStatus(ProductStatus.ACTIVE)
+    fun getProducts(category: ProductCategory?, label: ProductLabel?): List<ProductResponse> {
+        val products = when {
+            category != null && label != null -> productRepository.findByStatusAndCategoryAndLabel(ProductStatus.ACTIVE, category, label)
+            category != null -> productRepository.findByStatusAndCategory(ProductStatus.ACTIVE, category)
+            label != null -> productRepository.findByStatusAndLabel(ProductStatus.ACTIVE, label)
+            else -> productRepository.findByStatus(ProductStatus.ACTIVE)
         }
         return products.map { ProductResponse.from(it) }
     }

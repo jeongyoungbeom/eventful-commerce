@@ -8,8 +8,8 @@ spring:
   # Docker 환경에서는 컨테이너 이름으로 접속
   datasource:
     url: jdbc:postgresql://postgres:5432/payment_service
-    username: postgres
-    password: postgres
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:

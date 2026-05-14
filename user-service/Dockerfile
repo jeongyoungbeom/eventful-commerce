@@ -24,4 +24,4 @@ COPY --from=build /app/user-service/build/libs/*.jar app.jar
 
 EXPOSE 8085
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Dspring.profiles.active=docker", "-jar", "app.jar"]

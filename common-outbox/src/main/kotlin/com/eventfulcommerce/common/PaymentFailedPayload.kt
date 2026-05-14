@@ -7,7 +7,6 @@ data class PaymentFailedPayload(
     val paymentId: UUID,
     val orderId: UUID,
     val amount: Long,
-    val reservationId: UUID,
     val failedAt: Instant,
     val pgTxId: String
 )

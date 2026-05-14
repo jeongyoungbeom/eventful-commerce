@@ -1,10 +1,13 @@
 package com.eventfulcommerce.order.exception
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import jakarta.validation.ConstraintViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.servlet.resource.NoResourceFoundException
 import java.time.Instant
 
 private val logger = KotlinLogging.logger {}
@@ -15,6 +18,34 @@ private val logger = KotlinLogging.logger {}
  */
 @RestControllerAdvice
 class GlobalExceptionHandler {
+
+    @ExceptionHandler(MethodArgumentNotValidException::class)
+    fun handleValidation(ex: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
+        val errors = ex.bindingResult.fieldErrors.associate { it.field to (it.defaultMessage ?: "Invalid") }
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(ErrorResponse(
+                code = "VALIDATION_FAILED",
+                message = "요청 값이 올바르지 않습니다",
+                details = errors,
+                timestamp = Instant.now()
+            ))
+    }
+
+    @ExceptionHandler(ConstraintViolationException::class)
+    fun handleConstraintViolation(ex: ConstraintViolationException): ResponseEntity<ErrorResponse> {
+        val errors = ex.constraintViolations.associate {
+            it.propertyPath.toString() to (it.message ?: "Invalid")
+        }
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(ErrorResponse(
+                code = "VALIDATION_FAILED",
+                message = "요청 값이 올바르지 않습니다",
+                details = errors,
+                timestamp = Instant.now()
+            ))
+    }
 
     /**
      * 재고 부족 예외 처리
@@ -72,17 +103,17 @@ class GlobalExceptionHandler {
     }
 
     /**
-     * IllegalStateException 처리
+     * IllegalStateException 처리 (비즈니스 규칙 위반)
      */
     @ExceptionHandler(IllegalStateException::class)
     fun handleIllegalState(ex: IllegalStateException): ResponseEntity<ErrorResponse> {
-        logger.error(ex) { "IllegalStateException 발생: ${ex.message}" }
-        
+        logger.warn { "IllegalStateException 발생: ${ex.message}" }
+
         return ResponseEntity
-            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .status(HttpStatus.BAD_REQUEST)
             .body(ErrorResponse(
-                code = "ILLEGAL_STATE",
-                message = ex.message ?: "시스템 오류가 발생했습니다.",
+                code = "INVALID_STATE",
+                message = ex.message ?: "잘못된 요청입니다.",
                 timestamp = Instant.now()
             ))
     }
@@ -115,6 +146,24 @@ class GlobalExceptionHandler {
                 timestamp = Instant.now()
             ))
     }
+
+    @ExceptionHandler(OrderAccessDeniedException::class)
+    fun handleOrderAccessDenied(ex: OrderAccessDeniedException): ResponseEntity<ErrorResponse> {
+        logger.warn { "주문 접근 권한 없음: ${ex.message}" }
+        return ResponseEntity
+            .status(HttpStatus.FORBIDDEN)
+            .body(ErrorResponse(
+                code = "ORDER_ACCESS_DENIED",
+                message = ex.message ?: "해당 주문 조회 권한이 없습니다.",
+                timestamp = Instant.now()
+            ))
+    }
+
+    @ExceptionHandler(NoResourceFoundException::class)
+    fun handleNoResourceFound(ex: NoResourceFoundException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+            ErrorResponse(code = "NOT_FOUND", message = "요청한 경로를 찾을 수 없습니다", timestamp = Instant.now())
+        )
 
     /**
      * 모든 예외를 처리하는 폴백 핸들러

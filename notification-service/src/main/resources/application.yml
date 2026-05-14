@@ -2,15 +2,13 @@ server:
   port: 8084
 
 spring:
-  profiles:
-    default: dev
   application:
     name: notification-service
 
   datasource:
     url: jdbc:postgresql://localhost:5432/notification_service
-    username: postgres
-    password: postgres
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -53,16 +51,3 @@ outbox:
 
 jwt:
   secret: ${JWT_SECRET:}
-
----
-spring:
-  config:
-    activate:
-      on-profile: docker
-  datasource:
-    url: jdbc:postgresql://postgres:5432/notification_service
-  kafka:
-    bootstrap-servers: kafka:9092
-
-jwt:
-  secret: ${JWT_SECRET}

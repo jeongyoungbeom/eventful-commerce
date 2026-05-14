@@ -12,6 +12,7 @@ dependencyManagement {
 }
 
 dependencies {
+    implementation("org.springframework.boot:spring-boot-autoconfigure")
     implementation("org.springframework.kafka:spring-kafka")
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.1.0")
     compileOnly("org.springframework.data:spring-data-commons")

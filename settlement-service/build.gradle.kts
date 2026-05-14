@@ -9,6 +9,7 @@ plugins {
 dependencies {
     implementation(project(":common-auth"))
     implementation(project(":common-idempotency"))
+    implementation(project(":common-outbox"))
 
     implementation("org.springframework.boot:spring-boot-starter-batch")
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -19,6 +20,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-configuration-processor")
     implementation("org.springframework.kafka:spring-kafka")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("org.redisson:redisson-spring-boot-starter:3.27.2")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
     runtimeOnly("org.postgresql:postgresql")
 

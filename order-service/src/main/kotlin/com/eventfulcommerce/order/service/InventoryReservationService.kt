@@ -38,7 +38,7 @@ class InventoryReservationService(
     private fun holdCountKey(productId: String) = "{product:$productId}:holdCount"
     private fun holdKey(productId: String, reservationId: UUID) = "{product:$productId}:hold:$reservationId"
 
-    fun reserve(productId: String, orderId: UUID, ttlSeconds: Long): UUID? {
+    fun reserve(productId: String, orderId: UUID, quantity: Int, ttlSeconds: Long): UUID? {
         val reservationId = UUID.randomUUID()
         val holdValue = objectMapper.writeValueAsString(mapOf("orderId" to orderId.toString()))
 
@@ -46,27 +46,28 @@ class InventoryReservationService(
             reserveScript,
             listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId)),
             ttlSeconds.toString(),
-            holdValue
+            holdValue,
+            quantity.toString()
         ) ?: 0L
 
         val success = ok == 1L
         if (success) {
-            logger.debug { "재고 예약 성공: productId=$productId, orderId=$orderId, reservationId=$reservationId" }
+            logger.debug { "재고 예약 성공: productId=$productId, orderId=$orderId, quantity=$quantity, reservationId=$reservationId" }
         } else {
-            logger.warn { "재고 예약 실패 - 재고 부족: productId=$productId, orderId=$orderId" }
+            logger.warn { "재고 예약 실패 - 재고 부족: productId=$productId, orderId=$orderId, quantity=$quantity" }
         }
         
         return if (success) reservationId else null
     }
 
-    fun commit(productId: String, reservationId: UUID) {
-        redisTemplate.execute(commitScript, listOf(holdKey(productId, reservationId), holdCountKey(productId)))
-        logger.debug { "재고 확정: productId=$productId, reservationId=$reservationId" }
+    fun commit(productId: String, reservationId: UUID, quantity: Int) {
+        redisTemplate.execute(commitScript, listOf(holdKey(productId, reservationId), holdCountKey(productId)), quantity.toString())
+        logger.debug { "재고 확정: productId=$productId, quantity=$quantity, reservationId=$reservationId" }
     }
 
-    fun release(productId: String, reservationId: UUID) {
-        redisTemplate.execute(releaseScript, listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId)))
-        logger.debug { "재고 해제: productId=$productId, reservationId=$reservationId" }
+    fun release(productId: String, reservationId: UUID, quantity: Int) {
+        redisTemplate.execute(releaseScript, listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId)), quantity.toString())
+        logger.debug { "재고 해제: productId=$productId, quantity=$quantity, reservationId=$reservationId" }
     }
 
     fun initializeStock(productId: String, initialStock: Int) {
@@ -88,4 +89,7 @@ class InventoryReservationService(
         val holds = redisTemplate.opsForValue().get(holdCountKey(productId))?.toLong() ?: 0L
         logger.info { "재고 현황 - productId=$productId, 가용: $stock, 예약 중: $holds" }
     }
+
+    fun getAvailableStock(productId: String): Long =
+        redisTemplate.opsForValue().get(stockKey(productId))?.toLong() ?: 0L
 }

@@ -9,8 +9,8 @@ spring:
 
   datasource:
     url: jdbc:postgresql://localhost:5432/order_service
-    username: postgres
-    password: postgres
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -55,6 +55,9 @@ outbox:
 
 jwt:
   secret: ${JWT_SECRET:}
+
+order:
+  commission-rate: 0.1
 
 #logging:
 #  level:

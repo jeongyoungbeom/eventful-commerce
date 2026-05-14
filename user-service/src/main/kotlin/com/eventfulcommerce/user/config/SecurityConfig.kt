@@ -8,15 +8,19 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.web.cors.CorsConfigurationSource
 
 @Configuration
 @EnableWebSecurity
-class SecurityConfig {
+class SecurityConfig(
+    private val corsConfigurationSource: CorsConfigurationSource
+) {
 
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { it.disable() }
+            .cors { it.configurationSource(corsConfigurationSource) }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests { auth ->
                 auth
@@ -26,23 +30,14 @@ class SecurityConfig {
                         "/auth/refresh",
                         "/auth/password/**",
                         "/actuator/**",
+                        "/v3/api-docs/**",
+                        "/swagger-ui/**",
+                        "/swagger-ui.html",
                         "/error"
                     ).permitAll()
                     .anyRequest().authenticated()
             }
             .addFilterBefore(GatewayAuthFilter(), UsernamePasswordAuthenticationFilter::class.java)
-            .headers { headers ->
-                headers
-                    .frameOptions { it.deny() }
-                    .xssProtection { it.headerValue(
-                        org.springframework.security.web.header.writers.XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK
-                    ) }
-                    .contentSecurityPolicy { it.policyDirectives("default-src 'self'") }
-                    .httpStrictTransportSecurity {
-                        it.maxAgeInSeconds(31536000)
-                          .includeSubDomains(true)
-                    }
-            }
 
         return http.build()
     }

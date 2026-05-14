@@ -16,8 +16,9 @@ class OrderEventsConsumer(
     fun receive(value: String) {
         val readValue = objectMapper.readValue(value, OutboxEventMessage::class.java)
 
-        if (readValue.eventType != "ORDER_RESERVED") return
-
-        paymentService.handleOrderCreated(readValue)
+        when (readValue.eventType) {
+            "ORDER_RESERVED" -> paymentService.handleOrderCreated(readValue)
+            "ORDER_CANCELED" -> paymentService.handleOrderCanceled(readValue)
+        }
     }
 }

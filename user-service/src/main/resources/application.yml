@@ -1,22 +1,16 @@
-spring:
-  application:
-    name: user-service
-  profiles:
-    active: local
-
 server:
   port: 8085
 
----
 spring:
-  config:
-    activate:
-      on-profile: local
+  application:
+    name: user-service
+
   datasource:
     url: jdbc:postgresql://localhost:5432/user_service
-    username: postgres
-    password: postgres
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -24,10 +18,9 @@ spring:
     properties:
       hibernate:
         format_sql: true
+
   data:
     redis:
-      host: localhost
-      port: 7001
       cluster:
         nodes:
           - localhost:7001
@@ -37,10 +30,22 @@ spring:
           - localhost:7005
           - localhost:7006
 
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${GMAIL_USERNAME:}
+    password: ${GMAIL_APP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 jwt:
   secret: ${JWT_SECRET:your-super-secret-jwt-key-that-must-be-at-least-256-bits-long-for-hs256-algorithm}
-  access-token-validity: 3600000  # 1시간 (ms)
-  refresh-token-validity: 604800000  # 7일 (ms)
+  access-token-validity: 3600000
+  refresh-token-validity: 604800000
 
 management:
   endpoints:

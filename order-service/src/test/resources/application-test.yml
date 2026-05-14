@@ -9,7 +9,7 @@ spring:
 
   kafka:
     bootstrap-servers: localhost:9999  # 테스트에서는 Kafka 사용 안 함
-    
+
 logging:
   level:
     org.hibernate.SQL: debug

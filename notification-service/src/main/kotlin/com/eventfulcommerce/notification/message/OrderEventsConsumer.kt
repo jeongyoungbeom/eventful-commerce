@@ -39,33 +39,59 @@ class OrderEventsConsumer(
 
     private fun handleOrderReserved(eventMessage: OutboxEventMessage) {
         val payload = objectMapper.readValue(eventMessage.payload, OrderReservedPayload::class.java)
-        
-        val (title, message) = NotificationTemplate.orderReserved(payload.orderId)
-        
+
+        // 구매자 알림
+        val (buyerTitle, buyerMessage) = NotificationTemplate.orderReserved(payload.orderId)
         notificationService.createAndSend(
             userId = payload.userId,
             type = NotificationType.ORDER_RESERVED,
-            title = title,
-            message = message,
+            title = buyerTitle,
+            message = buyerMessage,
             orderId = payload.orderId
         )
-        
+
+        // 판매자 알림
+        payload.sellerOrders.forEach { sellerOrder ->
+            val quantity = sellerOrder.items.sumOf { it.quantity }
+            val (sellerTitle, sellerMessage) = NotificationTemplate.sellerOrderReceived(
+                payload.orderId, sellerOrder.paymentAmount, quantity
+            )
+            notificationService.createAndSend(
+                userId = sellerOrder.sellerId,
+                type = NotificationType.ORDER_RESERVED,
+                title = sellerTitle,
+                message = sellerMessage,
+                orderId = payload.orderId
+            )
+        }
+
         logger.info { "✅ ORDER_RESERVED 알림 처리 완료: orderId=${payload.orderId}" }
     }
 
     private fun handleOrderCanceled(eventMessage: OutboxEventMessage) {
         val payload = objectMapper.readValue(eventMessage.payload, OrderCanceledPayload::class.java)
-        
-        val (title, message) = NotificationTemplate.orderCanceled(payload.orderId, payload.reason)
-        
+
+        // 구매자 알림
+        val (buyerTitle, buyerMessage) = NotificationTemplate.orderCanceled(payload.orderId, payload.reason)
         notificationService.createAndSend(
             userId = payload.userId,
             type = NotificationType.ORDER_CANCELED,
-            title = title,
-            message = message,
+            title = buyerTitle,
+            message = buyerMessage,
             orderId = payload.orderId
         )
-        
+
+        payload.canceledSellerOrders.forEach { sellerOrder ->
+            val (sellerTitle, sellerMessage) = NotificationTemplate.sellerOrderCanceled(payload.orderId, payload.reason)
+            notificationService.createAndSend(
+                userId = sellerOrder.sellerId,
+                type = NotificationType.ORDER_CANCELED,
+                title = sellerTitle,
+                message = sellerMessage,
+                orderId = payload.orderId
+            )
+        }
+
         logger.info { "✅ ORDER_CANCELED 알림 처리 완료: orderId=${payload.orderId}" }
     }
 }

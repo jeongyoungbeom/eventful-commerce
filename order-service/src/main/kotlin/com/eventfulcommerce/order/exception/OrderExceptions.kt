@@ -23,3 +23,7 @@ class OrderNotFoundException(
 class OrderForbiddenException(
     val orderId: UUID
 ) : OrderException("해당 주문에 대한 권한이 없습니다. orderId=$orderId")
+
+class OrderAccessDeniedException(
+    message: String = "해당 주문 조회 권한이 없습니다."
+) : OrderException(message)

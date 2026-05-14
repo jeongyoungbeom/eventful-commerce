@@ -4,6 +4,7 @@ import com.eventfulcommerce.common.repository.OutboxEventRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.data.domain.PageRequest
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.scheduling.annotation.Scheduled
@@ -14,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
 private val logger = KotlinLogging.logger { }
 
 @Component
+@ConditionalOnProperty(prefix = "outbox.publisher", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class OutboxPublisher(
     private val outboxEventRepository: OutboxEventRepository,
     private val outboxEventService: OutboxEventService,
