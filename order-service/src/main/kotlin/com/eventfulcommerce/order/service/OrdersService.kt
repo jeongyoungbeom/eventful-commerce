@@ -9,6 +9,7 @@ import com.eventfulcommerce.order.domain.entity.SellerOrder
 import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
 import com.eventfulcommerce.order.dto.FailedOrderItemResponse
 import com.eventfulcommerce.order.dto.OrderResponse
+import com.eventfulcommerce.order.dto.SellerOrderResponse
 import com.eventfulcommerce.order.exception.OrderForbiddenException
 import com.eventfulcommerce.order.exception.OrderNotFoundException
 import com.eventfulcommerce.order.repository.OrdersRepository
@@ -218,23 +219,23 @@ class OrdersService(
     }
 
     @Transactional(readOnly = true)
-    fun getOrder(orderId: UUID, userId: UUID): Orders {
+    fun getOrder(orderId: UUID, userId: UUID): OrderResponse {
         val order = ordersRepository.findById(orderId).orElseThrow { OrderNotFoundException(orderId) }
         if (order.userId != userId) throw OrderForbiddenException(orderId)
-        return order
+        return OrderResponse.from(order)
     }
 
     @Transactional(readOnly = true)
-    fun getMyOrders(userId: UUID): List<Orders> =
-        ordersRepository.findByUserIdOrderByCreatedAtDesc(userId)
+    fun getMyOrders(userId: UUID): List<OrderResponse> =
+        ordersRepository.findByUserIdOrderByCreatedAtDesc(userId).map { OrderResponse.from(it) }
 
     @Transactional(readOnly = true)
-    fun getOrdersByUserId(userId: UUID): List<Orders> =
-        ordersRepository.findByUserIdOrderByCreatedAtDesc(userId)
+    fun getOrdersByUserId(userId: UUID): List<OrderResponse> =
+        ordersRepository.findByUserIdOrderByCreatedAtDesc(userId).map { OrderResponse.from(it) }
 
     @Transactional(readOnly = true)
-    fun getSellerOrders(sellerId: UUID) =
-        sellerOrderRepository.findBySellerIdOrderByCreatedAtDesc(sellerId)
+    fun getSellerOrders(sellerId: UUID): List<SellerOrderResponse> =
+        sellerOrderRepository.findBySellerIdWithItemsOrderByCreatedAtDesc(sellerId).map { SellerOrderResponse.from(it) }
 
     fun cancelOrder(orderId: UUID, userId: UUID): Boolean {
         val order = ordersRepository.findById(orderId).orElse(null)

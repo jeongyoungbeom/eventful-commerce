@@ -20,4 +20,11 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
+
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("io.mockk:mockk:1.13.9")
+    testImplementation("org.springframework:spring-tx")
+    testImplementation("org.springframework.data:spring-data-jpa")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

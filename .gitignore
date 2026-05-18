@@ -42,3 +42,6 @@ out/
 
 ### Dev Log ###
 .devlog/
+
+### Verification Results ###
+scripts/results/

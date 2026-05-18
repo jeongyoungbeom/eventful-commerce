@@ -45,7 +45,6 @@ class InventoryReservationService(
         val ok = redisTemplate.execute(
             reserveScript,
             listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId)),
-            ttlSeconds.toString(),
             holdValue,
             quantity.toString()
         ) ?: 0L

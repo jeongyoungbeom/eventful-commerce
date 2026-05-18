@@ -34,7 +34,7 @@ class OrderController(
     )
     fun getMyOrders(): ResponseEntity<List<OrderResponse>> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        return ResponseEntity.ok(ordersService.getMyOrders(userId).map { OrderResponse.from(it) })
+        return ResponseEntity.ok(ordersService.getMyOrders(userId))
     }
 
     @GetMapping("/orders/users/{userId}")
@@ -49,7 +49,7 @@ class OrderController(
             throw OrderAccessDeniedException("특정 사용자 주문 조회는 관리자만 가능합니다.")
         }
 
-        return ResponseEntity.ok(ordersService.getOrdersByUserId(userId).map { OrderResponse.from(it) })
+        return ResponseEntity.ok(ordersService.getOrdersByUserId(userId))
     }
 
     @GetMapping("/orders/{orderId}")
@@ -61,7 +61,7 @@ class OrderController(
     )
     fun getOrder(@PathVariable orderId: UUID): ResponseEntity<OrderResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        return ResponseEntity.ok(OrderResponse.from(ordersService.getOrder(orderId, userId)))
+        return ResponseEntity.ok(ordersService.getOrder(orderId, userId))
     }
 
     @PostMapping("/orders")
@@ -143,6 +143,6 @@ class OrderController(
     )
     fun getMySellerOrders(): ResponseEntity<List<SellerOrderResponse>> {
         val sellerId = SecurityContextUtil.getCurrentUserId()
-        return ResponseEntity.ok(ordersService.getSellerOrders(sellerId).map { SellerOrderResponse.from(it) })
+        return ResponseEntity.ok(ordersService.getSellerOrders(sellerId))
     }
 }

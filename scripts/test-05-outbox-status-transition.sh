@@ -15,6 +15,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 START_EPOCH=$(date +%s)
 STATUS="FAILED"
 MESSAGE="테스트가 완료되지 않았습니다"
+CLEANUP_DONE=0
 
 finish() {
   local end_epoch duration
@@ -48,17 +49,38 @@ db_exec() {
   docker exec eventful-postgres psql -U postgres -d "$db" -v ON_ERROR_STOP=0 -q -c "$sql" >/dev/null 2>&1 || true
 }
 
+redis_del() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local key
+  for key in "$@"; do
+    [[ -n "$key" ]] || continue
+    docker exec redis-node-1 redis-cli -c -p 7001 del "$key" >/dev/null 2>&1 || true
+  done
+}
+
+redis_del_pattern() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local pattern="$1"
+  local key
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    redis_del "$key"
+  done < <(docker exec redis-node-1 redis-cli -c -p 7001 --scan --pattern "$pattern" 2>/dev/null || true)
+}
+
 cleanup() {
+  [[ "$CLEANUP_DONE" == "1" ]] && return 0
+  CLEANUP_DONE=1
   [[ "${KEEP_TEST_DATA:-0}" == "1" ]] && { echo "[정리] KEEP_TEST_DATA=1 설정으로 테스트 데이터 정리를 건너뜁니다"; return 0; }
   echo "[정리] 이번 실행에서 생성한 테스트 데이터를 삭제합니다"
   if [[ -n "${PRODUCT_ID:-}" ]]; then
     db_exec order_service "delete from product_read_model where product_id = '$PRODUCT_ID';"
     db_exec product_service "delete from outbox_event where aggregate_id = '$PRODUCT_ID'; delete from product_labels where product_id = '$PRODUCT_ID'; delete from product_images where product_id = '$PRODUCT_ID'; delete from products where id = '$PRODUCT_ID';"
-    command -v docker >/dev/null 2>&1 && docker exec redis-node-1 redis-cli -c -p 7001 --scan --pattern "{product:$PRODUCT_ID}:*" | xargs -r docker exec redis-node-1 redis-cli -c -p 7001 del >/dev/null 2>&1 || true
+    redis_del_pattern "{product:$PRODUCT_ID}:*"
   fi
   if [[ -n "${SELLER_ID:-}" || -n "${SELLER_EMAIL:-}" ]]; then
     db_exec user_service "delete from audit_logs where user_id = '${SELLER_ID:-}'; delete from sellers where email = '${SELLER_EMAIL:-}' or id = '${SELLER_ID:-}';"
-    command -v docker >/dev/null 2>&1 && docker exec redis-node-1 redis-cli -c -p 7001 del "refresh_token:seller:${SELLER_ID:-}" >/dev/null 2>&1 || true
+    redis_del "refresh_token:seller:${SELLER_ID:-}"
   fi
   echo "[정리] 테스트 데이터 정리 완료"
 }
@@ -69,7 +91,12 @@ on_exit() {
   finish
   exit "$code"
 }
+on_interrupt() {
+  MESSAGE="테스트가 인터럽트되어 중단되었습니다"
+  exit 130
+}
 trap on_exit EXIT
+trap on_interrupt INT TERM
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {

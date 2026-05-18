@@ -15,6 +15,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 START_EPOCH=$(date +%s)
 STATUS="FAILED"
 MESSAGE="테스트가 완료되지 않았습니다"
+CLEANUP_DONE=0
 STOCK_LIMIT="${STOCK_LIMIT:-1000}"
 STOCK_REQUESTS="${STOCK_REQUESTS:-5000}"
 STOCK_CONCURRENCY="${STOCK_CONCURRENCY:-400}"
@@ -54,7 +55,28 @@ db_exec() {
   docker exec eventful-postgres psql -U postgres -d "$db" -v ON_ERROR_STOP=0 -q -c "$sql" >/dev/null 2>&1 || true
 }
 
+redis_del() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local key
+  for key in "$@"; do
+    [[ -n "$key" ]] || continue
+    docker exec redis-node-1 redis-cli -c -p 7001 del "$key" >/dev/null 2>&1 || true
+  done
+}
+
+redis_del_pattern() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local pattern="$1"
+  local key
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    redis_del "$key"
+  done < <(docker exec redis-node-1 redis-cli -c -p 7001 --scan --pattern "$pattern" 2>/dev/null || true)
+}
+
 cleanup() {
+  [[ "$CLEANUP_DONE" == "1" ]] && return 0
+  CLEANUP_DONE=1
   [[ "${KEEP_TEST_DATA:-0}" == "1" ]] && { echo "[정리] KEEP_TEST_DATA=1 설정으로 테스트 데이터 정리를 건너뜁니다"; return 0; }
   echo "[정리] 이번 실행에서 생성한 테스트 데이터를 삭제합니다"
   if [[ -n "${PRODUCT_ID:-}" ]]; then
@@ -64,11 +86,11 @@ cleanup() {
     db_exec payment_service "delete from outbox_event where aggregate_id in (select id from payment_refund where order_id in (select order_id from payment where user_id = '${USER_ID:-}')); delete from payment_refund where order_id in (select order_id from payment where user_id = '${USER_ID:-}'); delete from outbox_event where aggregate_id in (select id from payment where user_id = '${USER_ID:-}'); delete from payment where user_id = '${USER_ID:-}';"
     db_exec order_service "delete from outbox_event where aggregate_id in (select id from orders where user_id = '${USER_ID:-}'); delete from order_items where seller_order_id in (select id from seller_orders where order_id in (select id from orders where user_id = '${USER_ID:-}')); delete from seller_orders where order_id in (select id from orders where user_id = '${USER_ID:-}'); delete from orders where user_id = '${USER_ID:-}'; delete from product_read_model where product_id = '$PRODUCT_ID';"
     db_exec product_service "delete from outbox_event where aggregate_id = '$PRODUCT_ID'; delete from product_labels where product_id = '$PRODUCT_ID'; delete from product_images where product_id = '$PRODUCT_ID'; delete from products where id = '$PRODUCT_ID';"
-    command -v docker >/dev/null 2>&1 && docker exec redis-node-1 redis-cli -c -p 7001 --scan --pattern "{product:$PRODUCT_ID}:*" | xargs -r docker exec redis-node-1 redis-cli -c -p 7001 del >/dev/null 2>&1 || true
+    redis_del_pattern "{product:$PRODUCT_ID}:*"
   fi
   if [[ -n "${USER_ID:-}" || -n "${SELLER_ID:-}" || -n "${USER_EMAIL:-}" || -n "${SELLER_EMAIL:-}" ]]; then
     db_exec user_service "delete from audit_logs where user_id in ('${USER_ID:-}', '${SELLER_ID:-}'); delete from users where email = '${USER_EMAIL:-}' or id = '${USER_ID:-}'; delete from sellers where email = '${SELLER_EMAIL:-}' or id = '${SELLER_ID:-}';"
-    command -v docker >/dev/null 2>&1 && docker exec redis-node-1 redis-cli -c -p 7001 del "refresh_token:user:${USER_ID:-}" "refresh_token:seller:${SELLER_ID:-}" >/dev/null 2>&1 || true
+    redis_del "refresh_token:user:${USER_ID:-}" "refresh_token:seller:${SELLER_ID:-}"
   fi
   echo "[정리] 테스트 데이터 정리 완료"
 }
@@ -79,7 +101,12 @@ on_exit() {
   finish
   exit "$code"
 }
+on_interrupt() {
+  MESSAGE="테스트가 인터럽트되어 중단되었습니다"
+  exit 130
+}
 trap on_exit EXIT
+trap on_interrupt INT TERM
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -183,6 +210,7 @@ echo "[단계] 주문 서비스 상품 읽기 모델 동기화 대기"
 wait_product_read_model "$PRODUCT_ID" || { MESSAGE="상품 읽기 모델이 주문 서비스에 동기화되지 않았습니다"; exit 1; }
 
 echo "[단계] 대량 동시 주문 요청 실행"
+export GATEWAY_URL PRODUCT_ID USER_TOKEN USER_ID
 RESULT_LINES=$(seq 1 "$STOCK_REQUESTS" | xargs -P "$STOCK_CONCURRENCY" -I {} bash -c '
   payload="{\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1}]}"
   response=$(curl -sS -w "\n%{http_code}" -X POST "$GATEWAY_URL/api/orders" \
@@ -191,8 +219,8 @@ RESULT_LINES=$(seq 1 "$STOCK_REQUESTS" | xargs -P "$STOCK_CONCURRENCY" -I {} bas
     -H "X-User-Id: $USER_ID" \
     -H "X-User-Role: USER" \
     -d "$payload" || printf "\n000")
-  status=$(printf "%s" "$response" | tail -n 1)
-  body=$(printf "%s" "$response" | sed "$d")
+  status="${response##*$'\''\n'\''}"
+  body="${response%$'\''\n'\''*}"
   order_id=$(printf "%s" "$body" | jq -r ".orderId // null" 2>/dev/null || echo null)
   if [[ "$status" == "200" && "$order_id" != "null" ]]; then
     echo "success"
@@ -204,6 +232,8 @@ RESULT_LINES=$(seq 1 "$STOCK_REQUESTS" | xargs -P "$STOCK_CONCURRENCY" -I {} bas
 SUCCESS_COUNT=$(printf "%s\n" "$RESULT_LINES" | awk '$0=="success"{c++} END{print c+0}')
 FAILURE_COUNT=$(printf "%s\n" "$RESULT_LINES" | awk '$0=="failure"{c++} END{print c+0}')
 OVERSELL_COUNT=$((SUCCESS_COUNT > STOCK_LIMIT ? SUCCESS_COUNT - STOCK_LIMIT : 0))
+EXPECTED_SUCCESS_COUNT=$((STOCK_REQUESTS < STOCK_LIMIT ? STOCK_REQUESTS : STOCK_LIMIT))
+EXPECTED_FINAL_REDIS_STOCK=$((STOCK_LIMIT - EXPECTED_SUCCESS_COUNT))
 
 if command -v docker >/dev/null 2>&1; then
   FINAL_REDIS_STOCK=$(docker exec redis-node-1 redis-cli -c -p 7001 get "{product:$PRODUCT_ID}:stock" 2>/dev/null || echo "unknown")
@@ -218,6 +248,14 @@ echo "[지표] 최종 Redis 가용 재고=$FINAL_REDIS_STOCK"
 
 if (( OVERSELL_COUNT > 0 )); then
   MESSAGE="초과 판매 발생: success=$SUCCESS_COUNT stock=$STOCK_LIMIT"
+  exit 1
+fi
+if (( SUCCESS_COUNT != EXPECTED_SUCCESS_COUNT )); then
+  MESSAGE="성공 주문 수가 기대값과 다릅니다. expected=$EXPECTED_SUCCESS_COUNT actual=$SUCCESS_COUNT"
+  exit 1
+fi
+if [[ "$FINAL_REDIS_STOCK" =~ ^[0-9]+$ ]] && (( FINAL_REDIS_STOCK != EXPECTED_FINAL_REDIS_STOCK )); then
+  MESSAGE="최종 Redis 재고가 기대값과 다릅니다. expected=$EXPECTED_FINAL_REDIS_STOCK actual=$FINAL_REDIS_STOCK"
   exit 1
 fi
 

@@ -15,6 +15,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 START_EPOCH=$(date +%s)
 STATUS="FAILED"
 MESSAGE="테스트가 완료되지 않았습니다"
+CLEANUP_DONE=0
 
 finish() {
   local end_epoch duration
@@ -51,6 +52,15 @@ db_exec() {
   docker exec eventful-postgres psql -U postgres -d "$db" -v ON_ERROR_STOP=0 -q -c "$sql" >/dev/null 2>&1 || true
 }
 
+redis_del() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local key
+  for key in "$@"; do
+    [[ -n "$key" ]] || continue
+    docker exec redis-node-1 redis-cli -c -p 7001 del "$key" >/dev/null 2>&1 || true
+  done
+}
+
 psql_value() {
   local db="$1" sql="$2"
   command -v docker >/dev/null 2>&1 || return 1
@@ -58,21 +68,22 @@ psql_value() {
 }
 
 redis_cleanup() {
-  command -v docker >/dev/null 2>&1 || return 0
   if [[ -n "${PRODUCT_ID:-}" ]]; then
-    docker exec redis-node-1 redis-cli -c -p 7001 del \
+    redis_del \
       "{product:$PRODUCT_ID}:stock" \
-      "{product:$PRODUCT_ID}:holdCount" >/dev/null 2>&1 || true
+      "{product:$PRODUCT_ID}:holdCount"
   fi
   if [[ -n "${USER_ID:-}" ]]; then
-    docker exec redis-node-1 redis-cli -c -p 7001 del "refresh_token:user:${USER_ID:-}" >/dev/null 2>&1 || true
+    redis_del "refresh_token:user:${USER_ID:-}"
   fi
   if [[ -n "${SELLER_ID:-}" ]]; then
-    docker exec redis-node-1 redis-cli -c -p 7001 del "refresh_token:seller:${SELLER_ID:-}" >/dev/null 2>&1 || true
+    redis_del "refresh_token:seller:${SELLER_ID:-}"
   fi
 }
 
 cleanup() {
+  [[ "$CLEANUP_DONE" == "1" ]] && return 0
+  CLEANUP_DONE=1
   [[ "${KEEP_TEST_DATA:-0}" == "1" ]] && { echo "[정리] KEEP_TEST_DATA=1 설정으로 테스트 데이터 정리를 건너뜁니다"; return 0; }
   echo "[정리] 이번 실행에서 생성한 테스트 데이터를 삭제합니다"
   if [[ -n "${ORDER_ID:-}" ]]; then
@@ -99,7 +110,12 @@ on_exit() {
   finish
   exit "$code"
 }
+on_interrupt() {
+  MESSAGE="테스트가 인터럽트되어 중단되었습니다"
+  exit 130
+}
 trap on_exit EXIT
+trap on_interrupt INT TERM
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {

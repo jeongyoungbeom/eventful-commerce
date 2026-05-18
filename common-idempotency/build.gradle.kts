@@ -17,4 +17,11 @@ dependencies {
     compileOnly("org.springframework.data:spring-data-commons")
     compileOnly("org.springframework.data:spring-data-jpa")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("io.mockk:mockk:1.13.9")
+    testImplementation("org.springframework:spring-tx")
+    testImplementation("org.springframework.data:spring-data-jpa")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

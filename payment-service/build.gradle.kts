@@ -30,6 +30,7 @@ dependencies {
 
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.mockito:mockito-inline:5.2.0")
+    testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
 }
