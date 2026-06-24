@@ -10,6 +10,7 @@ import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
 import com.eventfulcommerce.order.repository.SellerOrderRepository
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -28,6 +29,7 @@ class OrdersServiceTest {
     private lateinit var inventoryReservationService: InventoryReservationService
     private lateinit var idempotencyHandler: IdempotencyHandler
     private lateinit var orderCancelService: OrderCancelService
+    private lateinit var businessMetrics: EventfulBusinessMetrics
     private lateinit var objectMapper: ObjectMapper
     private lateinit var ordersService: OrdersService
 
@@ -40,6 +42,7 @@ class OrdersServiceTest {
         inventoryReservationService = mockk()
         idempotencyHandler = mockk(relaxed = true)
         orderCancelService = mockk(relaxed = true)
+        businessMetrics = mockk(relaxed = true)
         objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
         every { ordersRepository.save(any<Orders>()) } answers {
@@ -63,6 +66,7 @@ class OrdersServiceTest {
             idempotencyHandler = idempotencyHandler,
             objectMapper = objectMapper,
             orderCancelService = orderCancelService,
+            businessMetrics = businessMetrics,
             commissionRate = 0.1
         )
     }

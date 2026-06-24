@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Eventful Commerce
+    orgId: 1
+    folder: Eventful Commerce
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

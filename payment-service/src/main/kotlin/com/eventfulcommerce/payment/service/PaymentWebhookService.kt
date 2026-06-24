@@ -5,6 +5,7 @@ import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.common.PaymentCompletedPayload
 import com.eventfulcommerce.common.PaymentCompletedSellerPayload
 import com.eventfulcommerce.common.PaymentFailedPayload
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import com.eventfulcommerce.common.repository.OutboxEventRepository
 import com.eventfulcommerce.payment.domain.PaymentStatus
 import com.eventfulcommerce.payment.domain.PaymentWebhookRequest
@@ -22,7 +23,8 @@ private val logger = KotlinLogging.logger { }
 class PaymentWebhookService(
     private val paymentRepository: PaymentRepository,
     private val outboxEventRepository: OutboxEventRepository,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val businessMetrics: EventfulBusinessMetrics
 ) {
     @Transactional
     fun handle(request: PaymentWebhookRequest) {
@@ -33,8 +35,10 @@ class PaymentWebhookService(
 
         if (request.result == "SUCCESS") {
             successPayment(payment)
+            businessMetrics.increment("payment.webhook", "completed")
         } else {
             failedPayment(payment, request)
+            businessMetrics.increment("payment.webhook", "failed")
         }
 
     }

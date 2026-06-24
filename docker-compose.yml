@@ -395,6 +395,59 @@ services:
       - eventful-network
     restart: on-failure
 
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: eventful-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api-gateway:
+        condition: service_started
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      shipping-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      settlement-service:
+        condition: service_started
+    networks:
+      - eventful-network
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: eventful-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - eventful-network
+    restart: on-failure
+
 volumes:
   postgres_data:
   redis-node-1-data:
@@ -404,6 +457,8 @@ volumes:
   redis-node-5-data:
   redis-node-6-data:
   product-images:
+  prometheus-data:
+  grafana-data:
 
 networks:
   eventful-network:

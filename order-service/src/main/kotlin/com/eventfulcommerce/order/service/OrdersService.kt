@@ -15,6 +15,7 @@ import com.eventfulcommerce.order.exception.OrderNotFoundException
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
 import com.eventfulcommerce.order.repository.SellerOrderRepository
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
@@ -35,6 +36,7 @@ class OrdersService(
     private val idempotencyHandler: IdempotencyHandler,
     private val objectMapper: ObjectMapper,
     private val orderCancelService: OrderCancelService,
+    private val businessMetrics: EventfulBusinessMetrics,
     @Value("\${order.commission-rate:0.1}") private val commissionRate: Double
 ) {
     private val ttlSeconds = 10 * 60L
@@ -96,6 +98,7 @@ class OrdersService(
 
         if (reservedItems.isEmpty()) {
             ordersRepository.delete(order)
+            businessMetrics.increment("order.create", "failed")
             logger.info { "주문 생성 생략 - 예약 성공 상품 없음: userId=$userId" }
             return OrderResponse(
                 orderId = null,
@@ -149,6 +152,7 @@ class OrdersService(
         order.recomputeTotals()
         ordersRepository.save(order)
         recordOrderReserved(order)
+        businessMetrics.increment("order.create", "reserved")
 
         logger.info { "다판매자 주문 생성 완료: orderId=${order.id}, sellerOrders=${order.sellerOrders.size}, failedItems=${failedItems.size}" }
         return OrderResponse.from(order).copy(failedItems = failedItems)
@@ -205,6 +209,7 @@ class OrdersService(
                     )
                 )
             )
+            businessMetrics.increment("order.payment", "confirmed")
 
             logger.info { "주문 확정 완료: orderId=${order.id}" }
         }
@@ -246,14 +251,18 @@ class OrdersService(
             throw OrderForbiddenException(orderId)
         }
 
-        return orderCancelService.cancel(orderId, "사용자 요청")
+        val canceled = orderCancelService.cancel(orderId, "사용자 요청")
+        businessMetrics.increment("order.cancel", if (canceled) "success" else "failed")
+        return canceled
     }
 
     fun cancelSellerOrder(orderId: UUID, sellerOrderId: UUID, userId: UUID): Boolean {
         val order = ordersRepository.findById(orderId).orElse(null)
             ?: throw OrderNotFoundException(orderId)
         if (order.userId != userId) throw OrderForbiddenException(orderId)
-        return orderCancelService.cancelSellerOrder(orderId, sellerOrderId, "사용자 요청")
+        val canceled = orderCancelService.cancelSellerOrder(orderId, sellerOrderId, "사용자 요청")
+        businessMetrics.increment("order.cancel.seller_order", if (canceled) "success" else "failed")
+        return canceled
     }
 
     private fun recordOrderReserved(order: Orders) {

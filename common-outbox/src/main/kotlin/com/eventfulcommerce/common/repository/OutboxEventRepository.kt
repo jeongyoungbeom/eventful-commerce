@@ -12,6 +12,7 @@ import java.util.*
 
 interface OutboxEventRepository : JpaRepository<OutboxEvent, UUID> {
     fun findByStatusOrderByCreatedAtAsc(status: OutboxStatus, pageable: Pageable): List<OutboxEvent>
+    fun countByStatus(status: OutboxStatus): Long
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(

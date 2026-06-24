@@ -5,6 +5,7 @@ import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.common.PaymentCompletedPayload
 import com.eventfulcommerce.common.PaymentCompletedSellerPayload
 import com.eventfulcommerce.common.PaymentFailedPayload
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import com.eventfulcommerce.payment.domain.PaymentStatus
 import com.eventfulcommerce.payment.domain.PaymentWebhookRequest
 import com.eventfulcommerce.payment.domain.entity.Payment
@@ -27,6 +28,7 @@ import java.util.UUID
 class PaymentWebhookServiceTest {
     private lateinit var paymentRepository: PaymentRepository
     private lateinit var outboxEventRepository: com.eventfulcommerce.common.repository.OutboxEventRepository
+    private lateinit var businessMetrics: EventfulBusinessMetrics
     private lateinit var objectMapper: ObjectMapper
     private lateinit var paymentWebhookService: PaymentWebhookService
 
@@ -34,11 +36,13 @@ class PaymentWebhookServiceTest {
     fun setUp() {
         paymentRepository = mock()
         outboxEventRepository = mock()
+        businessMetrics = mock()
         objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
         paymentWebhookService = PaymentWebhookService(
             paymentRepository = paymentRepository,
             outboxEventRepository = outboxEventRepository,
-            objectMapper = objectMapper
+            objectMapper = objectMapper,
+            businessMetrics = businessMetrics
         )
     }
 

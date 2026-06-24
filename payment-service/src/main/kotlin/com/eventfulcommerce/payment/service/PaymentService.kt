@@ -8,6 +8,7 @@ import com.eventfulcommerce.payment.domain.entity.PaymentRefund
 import com.eventfulcommerce.payment.repository.PaymentRefundRepository
 import com.eventfulcommerce.payment.repository.PaymentRepository
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -20,7 +21,8 @@ class PaymentService(
     private val idempotencyHandler: IdempotencyHandler,
     private val paymentRepository: PaymentRepository,
     private val paymentRefundRepository: PaymentRefundRepository,
-    private val outboxEventRepository: OutboxEventRepository
+    private val outboxEventRepository: OutboxEventRepository,
+    private val businessMetrics: EventfulBusinessMetrics
 ) {
     @Transactional
     fun handleOrderCreated(message: OutboxEventMessage) {
@@ -55,6 +57,7 @@ class PaymentService(
 
             logger.info { "결제 생성: orderId=${payload.orderId}, amount=${payload.totalPaymentAmount}" }
             paymentRepository.save(payment)
+            businessMetrics.increment("payment.reserve", "created")
         }
     }
 
@@ -117,6 +120,7 @@ class PaymentService(
             }
             paymentRepository.save(payment)
             if (refundEvents.isNotEmpty()) outboxEventRepository.saveAll(refundEvents)
+            businessMetrics.increment("payment.refund", if (refundEvents.isNotEmpty()) "created" else "skipped")
 
             logger.info { "환불 처리 완료: orderId=${payload.orderId}, refunds=${refundEvents.size}" }
         }

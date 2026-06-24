@@ -19,7 +19,13 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
+
+    testImplementation("org.springframework:spring-test")
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("io.mockk:mockk:1.13.9")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

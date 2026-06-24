@@ -13,6 +13,7 @@ import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.PaymentRefundedPayload
 import com.eventfulcommerce.common.PaymentCompletedSellerPayload
 import com.eventfulcommerce.common.repository.OutboxEventRepository
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import com.eventfulcommerce.payment.domain.PaymentStatus
 import com.eventfulcommerce.payment.domain.entity.Payment
 import com.eventfulcommerce.payment.domain.entity.PaymentRefund
@@ -40,6 +41,7 @@ class PaymentServiceTest {
     private lateinit var paymentRepository: PaymentRepository
     private lateinit var paymentRefundRepository: PaymentRefundRepository
     private lateinit var outboxEventRepository: OutboxEventRepository
+    private lateinit var businessMetrics: EventfulBusinessMetrics
     private lateinit var paymentService: PaymentService
 
     @BeforeEach
@@ -49,6 +51,7 @@ class PaymentServiceTest {
         paymentRepository = mock()
         paymentRefundRepository = mock()
         outboxEventRepository = mock()
+        businessMetrics = mock()
 
         whenever(idempotencyHandler.executeIdempotent<Unit>(any<UUID>(), any())).thenAnswer {
             @Suppress("UNCHECKED_CAST")
@@ -62,7 +65,8 @@ class PaymentServiceTest {
             idempotencyHandler = idempotencyHandler,
             paymentRepository = paymentRepository,
             paymentRefundRepository = paymentRefundRepository,
-            outboxEventRepository = outboxEventRepository
+            outboxEventRepository = outboxEventRepository,
+            businessMetrics = businessMetrics
         )
     }
 
