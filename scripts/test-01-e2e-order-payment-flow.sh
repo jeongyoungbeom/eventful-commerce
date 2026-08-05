@@ -38,7 +38,8 @@ finish() {
     --arg productId "${PRODUCT_ID:-}" \
     --arg orderId "${ORDER_ID:-}" \
     --arg finalOrderStatus "${FINAL_ORDER_STATUS:-}" \
-    '{test:$test,status:$status,message:$message,gatewayUrl:$gatewayUrl,resultDir:$resultDir,logFile:$logFile,startedAt:$startedAt,endedAt:$endedAt,durationSeconds:$durationSeconds,data:{sellerEmail:$sellerEmail,userEmail:$userEmail,productId:$productId,orderId:$orderId,finalOrderStatus:$finalOrderStatus}}' \
+    --arg finalShippingStatus "${FINAL_SHIPPING_STATUS:-}" \
+    '{test:$test,status:$status,message:$message,gatewayUrl:$gatewayUrl,resultDir:$resultDir,logFile:$logFile,startedAt:$startedAt,endedAt:$endedAt,durationSeconds:$durationSeconds,data:{sellerEmail:$sellerEmail,userEmail:$userEmail,productId:$productId,orderId:$orderId,finalOrderStatus:$finalOrderStatus,finalShippingStatus:$finalShippingStatus}}' \
     > "$RESULT_FILE"
   echo
   echo "[결과] $status_label - $MESSAGE"
@@ -91,7 +92,7 @@ cleanup() {
     db_exec shipping_service "delete from outbox_event where payload like '%$ORDER_ID%'; delete from shipping where order_id = '$ORDER_ID';"
     db_exec settlement_service "delete from settlements where order_id = '$ORDER_ID';"
     db_exec payment_service "delete from outbox_event where aggregate_id in (select id from payment_refund where order_id = '$ORDER_ID'); delete from payment_refund where order_id = '$ORDER_ID'; delete from outbox_event where aggregate_id in (select id from payment where order_id = '$ORDER_ID'); delete from payment where order_id = '$ORDER_ID';"
-    db_exec order_service "delete from outbox_event where aggregate_id = '$ORDER_ID'; delete from order_items where seller_order_id in (select id from seller_orders where order_id = '$ORDER_ID'); delete from seller_orders where order_id = '$ORDER_ID'; delete from orders where id = '$ORDER_ID';"
+    db_exec order_service "delete from order_saga_refund_receipt where saga_id in (select id from order_saga where order_id = '$ORDER_ID'); delete from order_saga where order_id = '$ORDER_ID'; delete from order_request_idempotency where order_id = '$ORDER_ID'; delete from outbox_event where aggregate_id = '$ORDER_ID' or payload like '%$ORDER_ID%'; delete from order_items where seller_order_id in (select id from seller_orders where order_id = '$ORDER_ID'); delete from seller_orders where order_id = '$ORDER_ID'; delete from orders where id = '$ORDER_ID';"
   fi
   if [[ -n "${PRODUCT_ID:-}" ]]; then
     db_exec order_service "delete from product_read_model where product_id = '$PRODUCT_ID';"
@@ -126,7 +127,7 @@ require_cmd() {
 
 http_json() {
   local method="$1" url="$2" data="${3:-}" token="${4:-}"
-  local user_id="${5:-}" role="${6:-}"
+  local user_id="${5:-}" role="${6:-}" idempotency_key="${7:-}"
   local body_file status
   body_file=$(mktemp)
   if [[ -n "$token" ]]; then
@@ -135,6 +136,7 @@ http_json() {
       -H "Authorization: Bearer $token" \
       ${user_id:+-H "X-User-Id: $user_id"} \
       ${role:+-H "X-User-Role: $role"} \
+      ${idempotency_key:+-H "Idempotency-Key: $idempotency_key"} \
       ${data:+-d "$data"} || printf "000")
   else
     status=$(curl -sS -o "$body_file" -w "%{http_code}" -X "$method" "$url" \
@@ -196,6 +198,19 @@ wait_payment_record() {
   return 1
 }
 
+wait_shipping_completed() {
+  local order_id="$1" attempts="${2:-60}"
+  for _ in $(seq 1 "$attempts"); do
+    FINAL_SHIPPING_STATUS=$(psql_value shipping_service "select status from shipping where order_id='$order_id' order by created_at desc limit 1;" 2>/dev/null || true)
+    local sent_count
+    sent_count=$(psql_value shipping_service "select count(*) from outbox_event where event_type='SHIPPING_COMPLETED' and payload like '%$order_id%' and status='SENT';" 2>/dev/null || echo 0)
+    echo "[정보] 배송 상태=${FINAL_SHIPPING_STATUS:-NOT_CREATED}, 완료 이벤트 SENT=$sent_count"
+    [[ "$FINAL_SHIPPING_STATUS" == "COMPLETED" && "$sent_count" == "1" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
 require_cmd curl
 require_cmd jq
 
@@ -241,11 +256,14 @@ sleep "${EVENT_WAIT_SECONDS:-8}"
 
 echo "[단계] 주문 생성"
 ORDER_PAYLOAD="{\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":2}]}"
+ORDER_IDEMPOTENCY_KEY="$TEST_NAME-$TS"
 for attempt in $(seq 1 20); do
-  http_json POST "$GATEWAY_URL/api/orders" "$ORDER_PAYLOAD" "$USER_TOKEN" "$USER_ID" "USER"
+  http_json POST "$GATEWAY_URL/api/orders" "$ORDER_PAYLOAD" "$USER_TOKEN" "$USER_ID" "USER" "$ORDER_IDEMPOTENCY_KEY"
   if [[ "$RESPONSE_STATUS" == "200" ]]; then
     ORDER_ID=$(echo "$RESPONSE_BODY" | jq -r '.orderId')
-    break
+    if [[ -n "$ORDER_ID" && "$ORDER_ID" != "null" ]]; then
+      break
+    fi
   fi
   echo "[정보] 주문 생성 재시도 $attempt: HTTP $RESPONSE_STATUS $RESPONSE_BODY"
   sleep 1
@@ -270,5 +288,11 @@ if ! wait_order_status "ORDER_CONFIRMED" "$ORDER_ID" "$USER_TOKEN" "$USER_ID" "U
   exit 1
 fi
 
+echo "[단계] after-commit 비동기 배송 완료 및 Outbox 발행 대기"
+if ! wait_shipping_completed "$ORDER_ID" 60; then
+  MESSAGE="배송이 COMPLETED가 되거나 SHIPPING_COMPLETED Outbox가 SENT가 되지 않았습니다"
+  exit 1
+fi
+
 STATUS="PASSED"
-MESSAGE="상품 등록부터 주문 생성, 결제 성공, 주문 확정까지 정상 E2E 플로우를 검증했습니다."
+MESSAGE="상품 등록부터 주문·결제 확정, after-commit 비동기 배송 완료와 Outbox 발행까지 정상 E2E 플로우를 검증했습니다."

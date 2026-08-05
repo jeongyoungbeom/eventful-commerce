@@ -27,12 +27,13 @@ LOG_FILES=()
 
 usage() {
   cat <<'USAGE'
-Usage: ./scripts/verify.sh [scenario|gradle|all]
+Usage: ./scripts/verify.sh [scenario|resilience|gradle|all]
 
 Modes:
-  scenario  Run portfolio scenario scripts under scripts/test-*.sh. Default.
+  scenario    Run all scenario scripts under scripts/test-*.sh. Default.
+  resilience  Run today's reliability/resilience scenarios (test-06 through test-10).
   gradle    Run Gradle unit/build verification with ./gradlew test.
-  all       Run Gradle verification, then portfolio scenario scripts.
+  all         Run Gradle verification, then all scenario scripts.
 
 Environment:
   GATEWAY_URL   API gateway URL. Default: http://localhost
@@ -93,6 +94,11 @@ check_title() {
     test-03-order-cancel-lock-traffic) printf '주문 취소 중복 요청 방어' ;;
     test-04-payment-event-idempotency) printf '결제 이벤트 멱등성' ;;
     test-05-outbox-status-transition) printf 'Outbox 상태 전이' ;;
+    test-06-order-idempotency-inventory-sync) printf '주문 멱등성/재고 동기화' ;;
+    test-07-orphan-hold-cleanup) printf '고아 hold 자동 복구' ;;
+    test-08-saga-compensation-refund) printf 'Saga 취소/재입고/환불' ;;
+    test-09-dlt-archive-observability) printf 'DLT 아카이브/관측성' ;;
+    test-10-runtime-safety-config) printf '운영 안전 구성' ;;
     *) printf '%s' "$name" ;;
   esac
 }
@@ -294,6 +300,18 @@ case "$MODE" in
     run_scenario_script "$SCRIPT_DIR/test-03-order-cancel-lock-traffic.sh"
     run_scenario_script "$SCRIPT_DIR/test-04-payment-event-idempotency.sh"
     run_scenario_script "$SCRIPT_DIR/test-05-outbox-status-transition.sh"
+    run_scenario_script "$SCRIPT_DIR/test-06-order-idempotency-inventory-sync.sh"
+    run_scenario_script "$SCRIPT_DIR/test-07-orphan-hold-cleanup.sh"
+    run_scenario_script "$SCRIPT_DIR/test-08-saga-compensation-refund.sh"
+    run_scenario_script "$SCRIPT_DIR/test-09-dlt-archive-observability.sh"
+    run_scenario_script "$SCRIPT_DIR/test-10-runtime-safety-config.sh"
+    ;;
+  resilience)
+    run_scenario_script "$SCRIPT_DIR/test-06-order-idempotency-inventory-sync.sh"
+    run_scenario_script "$SCRIPT_DIR/test-07-orphan-hold-cleanup.sh"
+    run_scenario_script "$SCRIPT_DIR/test-08-saga-compensation-refund.sh"
+    run_scenario_script "$SCRIPT_DIR/test-09-dlt-archive-observability.sh"
+    run_scenario_script "$SCRIPT_DIR/test-10-runtime-safety-config.sh"
     ;;
   all)
     run_gradle_verification
@@ -302,6 +320,11 @@ case "$MODE" in
     run_scenario_script "$SCRIPT_DIR/test-03-order-cancel-lock-traffic.sh"
     run_scenario_script "$SCRIPT_DIR/test-04-payment-event-idempotency.sh"
     run_scenario_script "$SCRIPT_DIR/test-05-outbox-status-transition.sh"
+    run_scenario_script "$SCRIPT_DIR/test-06-order-idempotency-inventory-sync.sh"
+    run_scenario_script "$SCRIPT_DIR/test-07-orphan-hold-cleanup.sh"
+    run_scenario_script "$SCRIPT_DIR/test-08-saga-compensation-refund.sh"
+    run_scenario_script "$SCRIPT_DIR/test-09-dlt-archive-observability.sh"
+    run_scenario_script "$SCRIPT_DIR/test-10-runtime-safety-config.sh"
     ;;
   *)
     usage

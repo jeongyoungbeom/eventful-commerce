@@ -604,7 +604,20 @@ curl $BASE/settlements/my \
   -H "Authorization: Bearer $SELLER_TOKEN"
 ```
 
-자동화 스크립트는 `scripts/test-01-e2e-order-payment-flow.sh`부터 `scripts/test-05-outbox-status-transition.sh`까지 제공됩니다. 동시성 테스트 스크립트는 raw 응답 파일을 남기지 않고 결과 요약만 저장합니다.
+자동화 스크립트는 `scripts/test-01-e2e-order-payment-flow.sh`부터 `scripts/test-10-runtime-safety-config.sh`까지 제공됩니다. 동시성 테스트 스크립트는 raw 응답 파일을 남기지 않고 결과 요약만 저장합니다.
+
+```bash
+# 기존 + 복구/멱등성 시나리오 전체
+./scripts/verify.sh scenario
+
+# 이번 장애 복구 변경(test-06~test-10)만 빠르게 검증
+./scripts/verify.sh resilience
+
+# Gradle 테스트까지 모두 검증
+./scripts/verify.sh all
+```
+
+추가된 복구 시나리오는 주문 요청 멱등성 및 Redis/Product DB 재고 동기화, 고아 hold 자동 해제, 배송 실패 Saga 환불·재입고, DLT DB 아카이브/지표, 운영 프로필과 Kafka 영속성 구성을 검증합니다. 실패 상태를 직접 확인하려면 `KEEP_TEST_DATA=1`을 붙여 테스트 데이터를 보존할 수 있습니다.
 
 ---
 

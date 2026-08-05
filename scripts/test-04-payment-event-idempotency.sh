@@ -81,7 +81,7 @@ cleanup() {
     db_exec shipping_service "delete from outbox_event where payload like '%$ORDER_ID%'; delete from shipping where order_id = '$ORDER_ID'; delete from processed_event where event_id = '${PAYMENT_EVENT_ID:-}';"
     db_exec settlement_service "delete from processed_event where event_id = '${PAYMENT_EVENT_ID:-}'; delete from settlements where order_id = '$ORDER_ID';"
     db_exec payment_service "delete from outbox_event where aggregate_id in (select id from payment_refund where order_id = '$ORDER_ID'); delete from payment_refund where order_id = '$ORDER_ID'; delete from outbox_event where aggregate_id in (select id from payment where order_id = '$ORDER_ID'); delete from payment where order_id = '$ORDER_ID';"
-    db_exec order_service "delete from processed_event where event_id = '${PAYMENT_EVENT_ID:-}'; delete from outbox_event where aggregate_id = '$ORDER_ID'; delete from order_items where seller_order_id in (select id from seller_orders where order_id = '$ORDER_ID'); delete from seller_orders where order_id = '$ORDER_ID'; delete from orders where id = '$ORDER_ID';"
+    db_exec order_service "delete from processed_event where event_id = '${PAYMENT_EVENT_ID:-}'; delete from order_saga_refund_receipt where saga_id in (select id from order_saga where order_id = '$ORDER_ID'); delete from order_saga where order_id = '$ORDER_ID'; delete from order_request_idempotency where order_id = '$ORDER_ID'; delete from outbox_event where aggregate_id = '$ORDER_ID' or payload like '%$ORDER_ID%'; delete from order_items where seller_order_id in (select id from seller_orders where order_id = '$ORDER_ID'); delete from seller_orders where order_id = '$ORDER_ID'; delete from orders where id = '$ORDER_ID';"
   fi
   if [[ -n "${PRODUCT_ID:-}" ]]; then
     db_exec order_service "delete from product_read_model where product_id = '$PRODUCT_ID';"
@@ -122,7 +122,7 @@ psql_value() {
 
 http_json() {
   local method="$1" url="$2" data="${3:-}" token="${4:-}"
-  local user_id="${5:-}" role="${6:-}"
+  local user_id="${5:-}" role="${6:-}" idempotency_key="${7:-}"
   local body_file status
   body_file=$(mktemp)
   if [[ -n "$token" ]]; then
@@ -131,6 +131,7 @@ http_json() {
       -H "Authorization: Bearer $token" \
       ${user_id:+-H "X-User-Id: $user_id"} \
       ${role:+-H "X-User-Role: $role"} \
+      ${idempotency_key:+-H "Idempotency-Key: $idempotency_key"} \
       ${data:+-d "$data"} || printf "000")
   else
     status=$(curl -sS -o "$body_file" -w "%{http_code}" -X "$method" "$url" \
@@ -161,10 +162,36 @@ http_product_create() {
 wait_payment_event() {
   local order_id="$1"
   for _ in $(seq 1 60); do
-    PAYMENT_EVENT_ROW=$(psql_value payment_service "select id || '|' || aggregate_type || '|' || aggregate_id || '|' || event_type || '|' || replace(payload, E'\n', '') || '|' || created_at from outbox_event where event_type='PAYMENT_COMPLETED' and payload like '%$order_id%' order by created_at desc limit 1;" 2>/dev/null || true)
+    PAYMENT_EVENT_ROW=$(psql_value payment_service "select id || '|' || aggregate_type || '|' || aggregate_id || '|' || event_type || '|' || replace(payload, E'\n', '') from outbox_event where event_type='PAYMENT_COMPLETED' and payload like '%$order_id%' order by created_at desc limit 1;" 2>/dev/null || true)
     if [[ -n "$PAYMENT_EVENT_ROW" ]]; then
       return 0
     fi
+    sleep 1
+  done
+  return 1
+}
+
+payment_topic_end_offset() {
+  docker exec eventful-kafka /opt/kafka/bin/kafka-get-offsets.sh \
+    --bootstrap-server localhost:9092 \
+    --topic payment-events 2>/dev/null | awk -F: '$2 == 0 { print $3 }'
+}
+
+order_payment_current_offset() {
+  docker exec eventful-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+    --bootstrap-server localhost:9092 \
+    --describe --group order-service-group 2>/dev/null |
+    awk '$2 == "payment-events" && $3 == 0 { print $4 }'
+}
+
+wait_payment_topic_consumed() {
+  local target_offset="$1" attempts="${2:-180}"
+  local current_offset=0
+  for _ in $(seq 1 "$attempts"); do
+    current_offset=$(order_payment_current_offset)
+    [[ "$current_offset" =~ ^[0-9]+$ ]] || current_offset=0
+    echo "[정보] payment-events 소비 offset: $current_offset / $target_offset"
+    (( current_offset >= target_offset )) && return 0
     sleep 1
   done
   return 1
@@ -219,11 +246,14 @@ PRODUCT_ID=$(echo "$RESPONSE_BODY" | jq -r '.productId')
 sleep "${EVENT_WAIT_SECONDS:-8}"
 
 ORDER_PAYLOAD="{\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1}]}"
+ORDER_IDEMPOTENCY_KEY="$TEST_NAME-$TS"
 for attempt in $(seq 1 20); do
-  http_json POST "$GATEWAY_URL/api/orders" "$ORDER_PAYLOAD" "$USER_TOKEN" "$USER_ID" "USER"
+  http_json POST "$GATEWAY_URL/api/orders" "$ORDER_PAYLOAD" "$USER_TOKEN" "$USER_ID" "USER" "$ORDER_IDEMPOTENCY_KEY"
   if [[ "$RESPONSE_STATUS" == "200" ]]; then
     ORDER_ID=$(echo "$RESPONSE_BODY" | jq -r '.orderId')
-    break
+    if [[ -n "$ORDER_ID" && "$ORDER_ID" != "null" ]]; then
+      break
+    fi
   fi
   echo "[정보] 주문 생성 재시도 $attempt: HTTP $RESPONSE_STATUS $RESPONSE_BODY"
   sleep 1
@@ -242,7 +272,8 @@ http_json POST "$GATEWAY_URL/api/payments/webhook" "{\"orderId\":\"$ORDER_ID\",\
 
 echo "[단계] PAYMENT_COMPLETED 아웃박스 메시지 조회"
 wait_payment_event "$ORDER_ID" || { MESSAGE="PAYMENT_COMPLETED 아웃박스 이벤트를 찾지 못했습니다"; exit 1; }
-IFS='|' read -r PAYMENT_EVENT_ID AGGREGATE_TYPE AGGREGATE_ID EVENT_TYPE PAYLOAD OCCURRED_AT <<< "$PAYMENT_EVENT_ROW"
+IFS='|' read -r PAYMENT_EVENT_ID AGGREGATE_TYPE AGGREGATE_ID EVENT_TYPE PAYLOAD <<< "$PAYMENT_EVENT_ROW"
+OCCURRED_AT=$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")
 PAYMENT_EVENT_MESSAGE=$(jq -cn \
   --arg eventId "$PAYMENT_EVENT_ID" \
   --arg aggregateType "$AGGREGATE_TYPE" \
@@ -259,8 +290,12 @@ for _ in $(seq 1 "$DUPLICATE_EVENTS"); do
   echo "$PAYMENT_EVENT_MESSAGE"
 done | docker exec -i eventful-kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic payment-events >/dev/null
 
-echo "[단계] 이벤트 소비 대기"
-sleep "${DUPLICATE_WAIT_SECONDS:-15}"
+echo "[단계] 주입한 이벤트 전체 소비 대기"
+TARGET_OFFSET=$(payment_topic_end_offset)
+if [[ -z "$TARGET_OFFSET" ]] || ! wait_payment_topic_consumed "$TARGET_OFFSET" "${DUPLICATE_WAIT_ATTEMPTS:-180}"; then
+  MESSAGE="중복 이벤트가 제한 시간 안에 모두 소비되지 않았습니다 (target=${TARGET_OFFSET:-unknown})"
+  exit 1
+fi
 
 http_json GET "$GATEWAY_URL/api/orders/$ORDER_ID" "" "$USER_TOKEN" "$USER_ID" "USER"
 [[ "$RESPONSE_STATUS" == "200" ]] || { MESSAGE="주문 조회 실패: HTTP $RESPONSE_STATUS $RESPONSE_BODY"; exit 1; }

@@ -88,6 +88,9 @@ Prometheus rule은 `monitoring/prometheus/alerts.yml`에 있다. 현재 Compose 
 
 # 실행 환경이 기동된 경우 정상 흐름·동시성·중복 이벤트·Outbox 상태 전이 검증
 ./scripts/verify.sh all
+
+# 이번 복구 변경의 통합/구성 시나리오만 실행
+./scripts/verify.sh resilience
 ```
 
 검증 결과는 `scripts/results/<run-id>/summary.md`와 `result.json`에 남는다. 장애 재현 중에는 `KEEP_TEST_DATA=1`로 실행해 DB 상태를 보존하고, 원인 확인이 끝난 뒤 명시적으로 정리한다.

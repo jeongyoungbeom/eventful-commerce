@@ -1,4 +1,7 @@
 spring:
+  config:
+    activate:
+      on-profile: docker
   datasource:
     url: jdbc:postgresql://postgres:5432/user_service
     username: ${DB_USERNAME:postgres}
@@ -9,6 +12,8 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  flyway:
+    enabled: false
   data:
     redis:
       cluster:

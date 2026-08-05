@@ -85,7 +85,7 @@ cleanup() {
     db_exec shipping_service "delete from outbox_event where payload like '%$ORDER_ID%'; delete from shipping where order_id = '$ORDER_ID';"
     db_exec settlement_service "delete from settlements where order_id = '$ORDER_ID';"
     db_exec payment_service "delete from outbox_event where aggregate_id in (select id from payment_refund where order_id = '$ORDER_ID'); delete from payment_refund where order_id = '$ORDER_ID'; delete from outbox_event where aggregate_id in (select id from payment where order_id = '$ORDER_ID'); delete from payment where order_id = '$ORDER_ID';"
-    db_exec order_service "delete from outbox_event where aggregate_id = '$ORDER_ID'; delete from order_items where seller_order_id in (select id from seller_orders where order_id = '$ORDER_ID'); delete from seller_orders where order_id = '$ORDER_ID'; delete from orders where id = '$ORDER_ID';"
+    db_exec order_service "delete from order_saga_refund_receipt where saga_id in (select id from order_saga where order_id = '$ORDER_ID'); delete from order_saga where order_id = '$ORDER_ID'; delete from order_request_idempotency where order_id = '$ORDER_ID'; delete from outbox_event where aggregate_id = '$ORDER_ID' or payload like '%$ORDER_ID%'; delete from order_items where seller_order_id in (select id from seller_orders where order_id = '$ORDER_ID'); delete from seller_orders where order_id = '$ORDER_ID'; delete from orders where id = '$ORDER_ID';"
   fi
   if [[ -n "${PRODUCT_ID:-}" ]]; then
     db_exec order_service "delete from product_read_model where product_id = '$PRODUCT_ID';"
@@ -121,7 +121,7 @@ require_cmd() {
 
 http_json() {
   local method="$1" url="$2" data="${3:-}" token="${4:-}"
-  local user_id="${5:-}" role="${6:-}"
+  local user_id="${5:-}" role="${6:-}" idempotency_key="${7:-}"
   local body_file status
   body_file=$(mktemp)
   if [[ -n "$token" ]]; then
@@ -130,6 +130,7 @@ http_json() {
       -H "Authorization: Bearer $token" \
       ${user_id:+-H "X-User-Id: $user_id"} \
       ${role:+-H "X-User-Role: $role"} \
+      ${idempotency_key:+-H "Idempotency-Key: $idempotency_key"} \
       ${data:+-d "$data"} || printf "000")
   else
     status=$(curl -sS -o "$body_file" -w "%{http_code}" -X "$method" "$url" \
@@ -194,11 +195,14 @@ PRODUCT_ID=$(echo "$RESPONSE_BODY" | jq -r '.productId')
 sleep "${EVENT_WAIT_SECONDS:-8}"
 
 ORDER_PAYLOAD="{\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1}]}"
+ORDER_IDEMPOTENCY_KEY="$TEST_NAME-$TS"
 for attempt in $(seq 1 20); do
-  http_json POST "$GATEWAY_URL/api/orders" "$ORDER_PAYLOAD" "$USER_TOKEN" "$USER_ID" "USER"
+  http_json POST "$GATEWAY_URL/api/orders" "$ORDER_PAYLOAD" "$USER_TOKEN" "$USER_ID" "USER" "$ORDER_IDEMPOTENCY_KEY"
   if [[ "$RESPONSE_STATUS" == "200" ]]; then
     ORDER_ID=$(echo "$RESPONSE_BODY" | jq -r '.orderId')
-    break
+    if [[ -n "$ORDER_ID" && "$ORDER_ID" != "null" ]]; then
+      break
+    fi
   fi
   echo "[정보] 주문 생성 재시도 $attempt: HTTP $RESPONSE_STATUS $RESPONSE_BODY"
   sleep 1

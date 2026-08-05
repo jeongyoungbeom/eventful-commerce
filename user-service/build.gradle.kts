@@ -26,6 +26,8 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     
     // Database
+    implementation("org.flywaydb:flyway-core")
+    runtimeOnly("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
     
     // Kafka

@@ -84,7 +84,7 @@ cleanup() {
     db_exec shipping_service "delete from shipping where user_id = '${USER_ID:-}';"
     db_exec settlement_service "delete from settlements where user_id = '${USER_ID:-}' or seller_id = '${SELLER_ID:-}';"
     db_exec payment_service "delete from outbox_event where aggregate_id in (select id from payment_refund where order_id in (select order_id from payment where user_id = '${USER_ID:-}')); delete from payment_refund where order_id in (select order_id from payment where user_id = '${USER_ID:-}'); delete from outbox_event where aggregate_id in (select id from payment where user_id = '${USER_ID:-}'); delete from payment where user_id = '${USER_ID:-}';"
-    db_exec order_service "delete from outbox_event where aggregate_id in (select id from orders where user_id = '${USER_ID:-}'); delete from order_items where seller_order_id in (select id from seller_orders where order_id in (select id from orders where user_id = '${USER_ID:-}')); delete from seller_orders where order_id in (select id from orders where user_id = '${USER_ID:-}'); delete from orders where user_id = '${USER_ID:-}'; delete from product_read_model where product_id = '$PRODUCT_ID';"
+    db_exec order_service "delete from order_saga_refund_receipt where saga_id in (select id from order_saga where order_id in (select id from orders where user_id = '${USER_ID:-}')); delete from order_saga where order_id in (select id from orders where user_id = '${USER_ID:-}'); delete from order_request_idempotency where user_id = '${USER_ID:-}'; delete from outbox_event where aggregate_id in (select id from orders where user_id = '${USER_ID:-}') or payload like '%$PRODUCT_ID%'; delete from order_items where seller_order_id in (select id from seller_orders where order_id in (select id from orders where user_id = '${USER_ID:-}')); delete from seller_orders where order_id in (select id from orders where user_id = '${USER_ID:-}'); delete from orders where user_id = '${USER_ID:-}'; delete from product_read_model where product_id = '$PRODUCT_ID';"
     db_exec product_service "delete from outbox_event where aggregate_id = '$PRODUCT_ID'; delete from product_labels where product_id = '$PRODUCT_ID'; delete from product_images where product_id = '$PRODUCT_ID'; delete from products where id = '$PRODUCT_ID';"
     redis_del_pattern "{product:$PRODUCT_ID}:*"
   fi
@@ -170,6 +170,24 @@ wait_product_read_model() {
   return 1
 }
 
+wait_product_stock() {
+  local product_id="$1" expected_stock="$2"
+  if ! command -v docker >/dev/null 2>&1; then
+    sleep "${INVENTORY_LEDGER_WAIT_SECONDS:-15}"
+    return 0
+  fi
+  for _ in $(seq 1 "${INVENTORY_LEDGER_WAIT_ATTEMPTS:-120}"); do
+    local stock
+    stock=$(docker exec eventful-postgres psql -U postgres -d product_service -tAc \
+      "select stock from products where id='$product_id';" 2>/dev/null || true)
+    if [[ "$stock" == "$expected_stock" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 require_cmd curl
 require_cmd jq
 require_cmd xargs
@@ -210,7 +228,7 @@ echo "[단계] 주문 서비스 상품 읽기 모델 동기화 대기"
 wait_product_read_model "$PRODUCT_ID" || { MESSAGE="상품 읽기 모델이 주문 서비스에 동기화되지 않았습니다"; exit 1; }
 
 echo "[단계] 대량 동시 주문 요청 실행"
-export GATEWAY_URL PRODUCT_ID USER_TOKEN USER_ID
+export GATEWAY_URL PRODUCT_ID USER_TOKEN USER_ID TEST_NAME TS
 RESULT_LINES=$(seq 1 "$STOCK_REQUESTS" | xargs -P "$STOCK_CONCURRENCY" -I {} bash -c '
   payload="{\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1}]}"
   response=$(curl -sS -w "\n%{http_code}" -X POST "$GATEWAY_URL/api/orders" \
@@ -218,6 +236,7 @@ RESULT_LINES=$(seq 1 "$STOCK_REQUESTS" | xargs -P "$STOCK_CONCURRENCY" -I {} bas
     -H "Authorization: Bearer $USER_TOKEN" \
     -H "X-User-Id: $USER_ID" \
     -H "X-User-Role: USER" \
+    -H "Idempotency-Key: $TEST_NAME-$TS-$1" \
     -d "$payload" || printf "\n000")
   status="${response##*$'\''\n'\''}"
   body="${response%$'\''\n'\''*}"
@@ -256,6 +275,12 @@ if (( SUCCESS_COUNT != EXPECTED_SUCCESS_COUNT )); then
 fi
 if [[ "$FINAL_REDIS_STOCK" =~ ^[0-9]+$ ]] && (( FINAL_REDIS_STOCK != EXPECTED_FINAL_REDIS_STOCK )); then
   MESSAGE="최종 Redis 재고가 기대값과 다릅니다. expected=$EXPECTED_FINAL_REDIS_STOCK actual=$FINAL_REDIS_STOCK"
+  exit 1
+fi
+
+echo "[단계] 재고 원장 이벤트가 Product DB에 모두 반영될 때까지 대기"
+if ! wait_product_stock "$PRODUCT_ID" "$EXPECTED_FINAL_REDIS_STOCK"; then
+  MESSAGE="Product DB 재고가 Kafka 원장 이벤트를 따라잡지 못했습니다. expected=$EXPECTED_FINAL_REDIS_STOCK"
   exit 1
 fi
 

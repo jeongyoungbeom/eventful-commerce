@@ -209,4 +209,4 @@ if [[ "$FINAL_OUTBOX_STATUS" != "SENT" && "$FINAL_OUTBOX_STATUS" != "FAILED" ]];
 fi
 
 STATUS="PASSED"
-MESSAGE="상품 등록 아웃박스 이벤트가 PENDING에서 발행 결과 상태($FINAL_OUTBOX_STATUS)로 전이됨을 검증했습니다."
+MESSAGE="상품 등록 아웃박스 이벤트가 최종 발행 결과 상태($FINAL_OUTBOX_STATUS)에 도달함을 검증했습니다."
