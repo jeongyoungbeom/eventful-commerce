@@ -1,0 +1,35 @@
+groups:
+  - name: eventful-commerce
+    rules:
+      - alert: EventfulOutboxFailed
+        expr: eventful_outbox_events{status="FAILED"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox event delivery has exhausted retries"
+          description: "{{ $labels.service }} has {{ $value }} failed outbox events. Review /internal/outbox/failed."
+      - alert: EventfulDeadLetterPending
+        expr: eventful_dlt_events{status="PENDING"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-letter events require operator action"
+          description: "Dead-letter events are awaiting a reviewed replay."
+      - alert: EventfulSagaCompensationStuck
+        expr: eventful_saga_orders{status=~"COMPENSATION_REQUESTED|COMPENSATION_FAILED|REFUND_PENDING"} > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Saga compensation has not completed"
+          description: "{{ $labels.service }} has {{ $value }} saga records requiring intervention."
+      - alert: EventfulServiceDown
+        expr: up{job=~"order-service|payment-service|shipping-service"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Eventful Commerce service is down"
+          description: "{{ $labels.job }} has been unreachable for more than two minutes."

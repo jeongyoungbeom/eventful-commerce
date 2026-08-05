@@ -1,12 +1,16 @@
 package com.eventfulcommerce.order.controller
 
 import com.eventfulcommerce.common.auth.SecurityContextUtil
-import com.eventfulcommerce.order.domain.OrdersRequest
+import com.eventfulcommerce.order.dto.OrderCancelResponse
 import com.eventfulcommerce.order.dto.OrderResponse
 import com.eventfulcommerce.order.dto.SellerOrderResponse
+import com.eventfulcommerce.order.dto.SellerOrderCancelResponse
 import com.eventfulcommerce.order.exception.OrderAccessDeniedException
+import com.eventfulcommerce.order.request.OrdersRequest
 import com.eventfulcommerce.order.service.OrdersService
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.enums.ParameterIn
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
@@ -69,11 +73,24 @@ class OrderController(
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "주문 생성 처리 완료. 일부 실패 상품이 있어도 HTTP 200으로 반환"),
         ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
+        ApiResponse(responseCode = "409", description = "동일 Idempotency-Key 요청 처리 중 또는 다른 요청에 재사용됨"),
         ApiResponse(responseCode = "401", description = "인증 실패")
     )
-    fun orders(@Valid @RequestBody ordersRequest: OrdersRequest): ResponseEntity<OrderResponse> {
+    fun orders(
+        @Parameter(
+            name = "Idempotency-Key",
+            `in` = ParameterIn.HEADER,
+            required = true,
+            description = "A client-generated key reused when retrying the same order request."
+        )
+        @RequestHeader(name = "Idempotency-Key", required = false) idempotencyKey: String?,
+        @Valid @RequestBody ordersRequest: OrdersRequest
+    ): ResponseEntity<OrderResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        return ResponseEntity(ordersService.orders(ordersRequest, userId), HttpStatus.OK)
+        val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) {
+            "Idempotency-Key header is required for order creation"
+        }
+        return ResponseEntity(ordersService.orders(ordersRequest, userId, key), HttpStatus.OK)
     }
 
     @PostMapping("/orders/{orderId}/cancel")
@@ -84,21 +101,21 @@ class OrderController(
         ApiResponse(responseCode = "403", description = "주문 소유자가 아님"),
         ApiResponse(responseCode = "404", description = "주문 없음")
     )
-    fun cancelOrder(@PathVariable orderId: UUID): ResponseEntity<Map<String, Any>> {
+    fun cancelOrder(@PathVariable orderId: UUID): ResponseEntity<OrderCancelResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
         val success = ordersService.cancelOrder(orderId, userId)
 
         return if (success) {
-            ResponseEntity.ok(mapOf(
-                "success" to true,
-                "orderId" to orderId,
-                "message" to "주문이 취소되었습니다"
+            ResponseEntity.ok(OrderCancelResponse(
+                success = true,
+                orderId = orderId,
+                message = "주문이 취소되었습니다"
             ))
         } else {
-            ResponseEntity.badRequest().body(mapOf(
-                "success" to false,
-                "orderId" to orderId,
-                "message" to "주문 취소 실패 (이미 처리되었거나 취소 불가능한 상태)"
+            ResponseEntity.badRequest().body(OrderCancelResponse(
+                success = false,
+                orderId = orderId,
+                message = "주문 취소 실패 (이미 처리되었거나 취소 불가능한 상태)"
             ))
         }
     }
@@ -114,23 +131,23 @@ class OrderController(
     fun cancelSellerOrder(
         @PathVariable orderId: UUID,
         @PathVariable sellerOrderId: UUID
-    ): ResponseEntity<Map<String, Any>> {
+    ): ResponseEntity<SellerOrderCancelResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
         val success = ordersService.cancelSellerOrder(orderId, sellerOrderId, userId)
 
         return if (success) {
-            ResponseEntity.ok(mapOf(
-                "success" to true,
-                "orderId" to orderId,
-                "sellerOrderId" to sellerOrderId,
-                "message" to "판매자 주문이 취소되었습니다"
+            ResponseEntity.ok(SellerOrderCancelResponse(
+                success = true,
+                orderId = orderId,
+                sellerOrderId = sellerOrderId,
+                message = "판매자 주문이 취소되었습니다"
             ))
         } else {
-            ResponseEntity.badRequest().body(mapOf(
-                "success" to false,
-                "orderId" to orderId,
-                "sellerOrderId" to sellerOrderId,
-                "message" to "판매자 주문 취소 실패 (이미 처리되었거나 취소 불가능한 상태)"
+            ResponseEntity.badRequest().body(SellerOrderCancelResponse(
+                success = false,
+                orderId = orderId,
+                sellerOrderId = sellerOrderId,
+                message = "판매자 주문 취소 실패 (이미 처리되었거나 취소 불가능한 상태)"
             ))
         }
     }

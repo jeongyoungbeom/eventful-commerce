@@ -24,6 +24,7 @@ class PaymentWebhookService(
     private val paymentRepository: PaymentRepository,
     private val outboxEventRepository: OutboxEventRepository,
     private val objectMapper: ObjectMapper,
+    private val paymentService: PaymentService,
     private val businessMetrics: EventfulBusinessMetrics
 ) {
     @Transactional
@@ -65,6 +66,7 @@ class PaymentWebhookService(
             )
         )
         payment.status = PaymentStatus.PAYMENT_COMPLETED
+        paymentService.refundPendingCancellation(payment)
     }
 
     private fun failedPayment(

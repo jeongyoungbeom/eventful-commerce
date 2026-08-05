@@ -19,6 +19,7 @@ class OrderEventsConsumer(
         when (readValue.eventType) {
             "ORDER_RESERVED" -> paymentService.handleOrderCreated(readValue)
             "ORDER_CANCELED" -> paymentService.handleOrderCanceled(readValue)
+            "ORDER_CANCELLATION_RECONCILIATION_REQUESTED" -> paymentService.handleOrderCancellationReconciliation(readValue)
         }
     }
 }

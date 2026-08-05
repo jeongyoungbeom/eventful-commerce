@@ -27,3 +27,11 @@ class OrderForbiddenException(
 class OrderAccessDeniedException(
     message: String = "해당 주문 조회 권한이 없습니다."
 ) : OrderException(message)
+
+class OrderIdempotencyConflictException(
+    val keyFingerprint: String
+) : OrderException("Idempotency-Key was already used with a different order request.")
+
+class OrderIdempotencyInProgressException(
+    val keyFingerprint: String
+) : OrderException("Order request is still being completed.")

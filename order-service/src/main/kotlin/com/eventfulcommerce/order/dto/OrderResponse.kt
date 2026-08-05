@@ -1,10 +1,7 @@
 package com.eventfulcommerce.order.dto
 
 import com.eventfulcommerce.order.domain.OrdersStatus
-import com.eventfulcommerce.order.domain.entity.OrderItemStatus
 import com.eventfulcommerce.order.domain.entity.Orders
-import com.eventfulcommerce.order.domain.entity.SellerOrder
-import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 import java.util.UUID
@@ -46,69 +43,3 @@ data class OrderResponse(
         )
     }
 }
-
-@Schema(description = "판매자별 주문 그룹. 배송, 정산, 부분 취소/환불의 기준입니다.")
-data class SellerOrderResponse(
-    @field:Schema(description = "판매자 주문 ID")
-    val sellerOrderId: UUID,
-    @field:Schema(description = "판매자 ID")
-    val sellerId: UUID,
-    val itemTotalAmount: Long,
-    val deliveryFee: Long,
-    val paymentAmount: Long,
-    val commissionRate: Double,
-    val commissionAmount: Long,
-    val settlementAmount: Long,
-    val status: SellerOrderStatus,
-    val items: List<OrderItemResponse>
-) {
-    companion object {
-        fun from(sellerOrder: SellerOrder) = SellerOrderResponse(
-            sellerOrderId = sellerOrder.id,
-            sellerId = sellerOrder.sellerId,
-            itemTotalAmount = sellerOrder.itemTotalAmount,
-            deliveryFee = sellerOrder.deliveryFee,
-            paymentAmount = sellerOrder.paymentAmount,
-            commissionRate = sellerOrder.commissionRate,
-            commissionAmount = sellerOrder.commissionAmount,
-            settlementAmount = sellerOrder.settlementAmount,
-            status = sellerOrder.status,
-            items = sellerOrder.items.map {
-                OrderItemResponse(
-                    orderItemId = it.id,
-                    productId = it.productId,
-                    productName = it.productName,
-                    quantity = it.quantity,
-                    unitPrice = it.unitPrice,
-                    totalAmount = it.totalAmount,
-                    reservationId = it.reservationId,
-                    status = it.status
-                )
-            }
-        )
-    }
-}
-
-@Schema(description = "주문 상품 상세")
-data class OrderItemResponse(
-    val orderItemId: UUID,
-    val productId: UUID,
-    val productName: String,
-    val quantity: Int,
-    val unitPrice: Long,
-    val totalAmount: Long,
-    val reservationId: UUID,
-    val status: OrderItemStatus
-)
-
-@Schema(description = "주문에서 제외된 실패 상품")
-data class FailedOrderItemResponse(
-    @field:Schema(description = "실패한 상품 ID")
-    val productId: UUID,
-    @field:Schema(description = "실패 사유. INSUFFICIENT_STOCK 또는 PRODUCT_NOT_AVAILABLE", example = "INSUFFICIENT_STOCK")
-    val reason: String,
-    @field:Schema(description = "요청 수량", example = "3")
-    val requestedQuantity: Int,
-    @field:Schema(description = "현재 주문 가능한 재고 수량", example = "1")
-    val availableQuantity: Long
-)

@@ -9,6 +9,7 @@ import com.eventfulcommerce.user.domain.repository.UserRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.boot.CommandLineRunner
 import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 import java.util.UUID
 
@@ -16,6 +17,7 @@ import java.util.UUID
 // 이미 데이터가 존재하면 skip됩니다 (idempotent).
 // TEST_SELLER_ID는 product-service DataInitializer와 공유합니다.
 @Component
+@Profile("dev", "local")
 class DataInitializer(
     private val userRepository: UserRepository,
     private val sellerRepository: SellerRepository,

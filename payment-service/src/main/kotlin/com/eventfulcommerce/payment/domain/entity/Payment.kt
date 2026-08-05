@@ -6,7 +6,12 @@ import java.time.Instant
 import java.util.*
 
 @Entity
-@Table(name = "payment")
+@Table(
+    name = "payment",
+    uniqueConstraints = [
+        UniqueConstraint(name = "uk_payment_order", columnNames = ["order_id"])
+    ]
+)
 class Payment(
     @Column(name = "order_id", nullable = false)
     val orderId: UUID,
@@ -27,6 +32,13 @@ class Payment(
 
     @Column(nullable = false)
     var refundedAmount: Long = 0,
+
+    @Column(name = "cancellation_requested", nullable = false)
+    var cancellationRequested: Boolean = false,
+
+    @Lob
+    @Column(name = "pending_cancellation_payload")
+    var pendingCancellationPayload: String? = null,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now()

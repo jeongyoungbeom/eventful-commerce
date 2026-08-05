@@ -1,217 +1,93 @@
-# 장애 및 실패 시나리오 대응
+# 장애·보상·운영 검증 시나리오
 
-Eventful Commerce는 주문, 결제, 재고, 환불 흐름이 여러 서비스와 Kafka 이벤트를 통해 이어지는 구조입니다. 이 문서는 실패 상황별 위험, 대응 방식, 검증 근거를 정리합니다.
+이 문서는 Eventful Commerce의 주문-재고-결제-배송 흐름에서 **유실, 중복, 순서 역전**이 발생했을 때의 상태 전이와 운영 절차를 정의한다. 모든 서비스는 독립 DB를 사용하며, 서비스 간 정합성은 분산 트랜잭션이 아니라 Kafka 이벤트 기반 Saga로 맞춘다.
 
-## 검증 범위
+## 신뢰성 경계
 
-| 구분 | 검증 대상 |
-|---|---|
-| 단위 테스트 | 주문 생성, 결제 예약, 결제 완료, 주문 취소, 환불, 멱등성, Outbox 상태 전이 |
-| 시나리오 스크립트 | E2E 주문/결제, 재고 초과 판매 방지, 중복 취소, 중복 결제 이벤트, Outbox 상태 전이 |
+| 문제 | 구현 위치 | 보장 |
+|---|---|---|
+| 같은 HTTP 주문 요청 재시도 | `order_request_idempotency` | 동일 `Idempotency-Key`는 같은 요청 결과만 반환한다. 다른 본문 재사용은 거부한다. |
+| Redis 예약 중복·고아 hold | Redis Lua + 만료 스케줄러 | 같은 reservation은 한 번만 차감한다. 주문 DB가 없거나 만료된 hold는 release한다. |
+| DB 저장 후 Kafka 발행 실패 | `outbox_event` | 도메인 저장과 Outbox 저장은 한 DB 트랜잭션이다. 발행은 별도 publisher가 재시도한다. |
+| Kafka 중복 소비 | `processed_event` | 소비자는 eventId를 먼저 선점한다. 이미 처리한 이벤트는 비즈니스 로직을 실행하지 않는다. |
+| 서비스 간 보상 | `order_saga` | 주문 서비스가 주문별 Saga 상태와 예상 환불 수를 보관한다. 각 서비스는 자신의 DB와 수신 이벤트만 변경한다. |
 
-실행 명령:
+## 정상 흐름
 
-```bash
-./gradlew :payment-service:test :common-outbox:test :common-idempotency:test :order-service:test
-./scripts/verify.sh
-```
+1. order-service는 Redis Lua로 수량을 예약하고 `Order`, `SellerOrder`, `OrderItem`, `OrderSaga(RESERVED)`, `ORDER_RESERVED` Outbox를 한 트랜잭션에 저장한다.
+2. payment-service는 `ORDER_RESERVED`를 멱등 소비해 `PAYMENT_RESERVED` 결제를 저장한다.
+3. PG 성공 웹훅은 `PAYMENT_COMPLETED` Outbox를 만들고 결제 상태를 완료로 바꾼다.
+4. order-service는 결제 완료를 멱등 소비해 Redis hold를 commit하고 주문/Saga를 `CONFIRMED`로 바꾼 뒤 `ORDER_CONFIRMED`를 발행한다.
+5. shipping-service와 settlement-service는 `ORDER_CONFIRMED`를 소비해 각각 배송과 정산을 만든다.
 
-## 1. 재고 부족 및 부분 주문 실패
+## 실패·보상 시나리오
 
-상황:
-- 사용자가 여러 상품을 주문했지만 일부 상품의 재고가 부족하거나 판매 불가 상태일 수 있습니다.
+### 1. Redis 예약 뒤 주문 DB 저장 실패 또는 프로세스 종료
 
-위험:
-- 재고가 없는 상품까지 주문에 포함되면 결제, 배송, 정산 이벤트가 잘못 이어집니다.
-- 모든 상품이 실패했는데 주문 레코드가 남으면 후속 이벤트가 불필요하게 발생할 수 있습니다.
+- Redis hold에는 reservation ID와 TTL이 기록된다.
+- DB 트랜잭션 실패 시 즉시 release를 시도한다.
+- 즉시 release가 실패하거나 프로세스가 종료되면 `InventoryReservationCleanupScheduler`가 만료/고아 hold를 찾아 원자적으로 release한다.
+- 검증 기준: 가용 재고와 hold 집계가 원래 값으로 회복되고, 주문 DB에 해당 reservation의 유효 주문이 없어야 한다.
 
-대응:
-- `order-service`는 상품별로 `ProductReadModel` 상태를 확인합니다.
-- 판매 불가 상품은 재고 예약을 시도하지 않고 `failedItems`에 포함합니다.
-- Redis 재고 예약에 실패한 상품은 `INSUFFICIENT_STOCK`으로 분리합니다.
-- 예약 성공 상품이 하나도 없으면 임시 주문을 삭제하고 `ORDER_FAILED` 응답을 반환합니다.
+### 2. Outbox 발행 실패·중복 발행
 
-검증:
-- `OrdersServiceTest`
-  - 일부 상품 예약 실패 시 성공 상품만 주문하고 실패 상품을 응답
-  - 모든 상품 예약 실패 시 임시 주문 삭제
-  - 판매 불가 상품은 재고 예약 미시도
-- `scripts/test-02-stock-oversell-traffic.sh`
-  - 대량 동시 주문에서도 성공 수가 초기 재고를 초과하지 않음
+- publisher는 `PENDING` 이벤트를 claim token과 `PROCESSING` 상태로 원자적으로 선점한다.
+- Kafka 전송 성공은 동일 claim token일 때만 `SENT`로 전이한다. 오래된 publisher의 늦은 콜백은 상태를 덮어쓰지 못한다.
+- 전송 실패는 지수 backoff로 재시도한다. 최대 횟수를 넘으면 `FAILED`로 남기며 삭제하지 않는다.
+- 프로세스 종료로 `PROCESSING`에 멈춘 행은 lease timeout 이후 다시 `PENDING`으로 복구한다.
+- 결과적으로 Kafka에는 중복 전송될 수 있으므로, 소비자 `processed_event` 멱등성이 최종 방어선이다.
 
-## 2. 재고 초과 판매
+### 3. Outbox 실패 이벤트 운영 재처리
 
-상황:
-- 동일 상품에 대해 짧은 시간에 많은 주문 요청이 몰릴 수 있습니다.
+1. Prometheus의 `eventful_outbox_events{status="FAILED"}` 경보를 확인한다.
+2. 각 서비스의 `GET /internal/outbox/failed`로 실패 원인과 retry count를 조회한다. 이 API는 `outbox.operations.enabled=true`와 `X-Outbox-Operations-Token`이 모두 필요하다.
+3. Kafka/설정/데이터 원인을 먼저 해결한다.
+4. `POST /internal/outbox/failed/{eventId}/requeue`를 호출한다. 행은 새로 만들지 않고 같은 eventId를 `PENDING`으로 되돌리며 재처리 횟수와 시각을 감사 필드에 남긴다.
+5. `SENT` 또는 다시 `FAILED`가 되는지 지표와 DB를 확인한다.
 
-위험:
-- DB 조회 후 차감 방식으로 처리하면 동시성 경쟁으로 재고보다 많은 주문이 성공할 수 있습니다.
+재처리로 같은 Kafka 메시지가 다시 전달되어도 consumer의 `processed_event(event_id PK)`가 비즈니스 로직의 중복 실행을 차단한다.
 
-대응:
-- Redis Lua 스크립트로 재고 확인과 예약 차감을 원자적으로 처리합니다.
-- 주문 확정 전에는 예약 재고로 보관하고, 결제 완료 시 commit합니다.
-- 주문 취소나 결제 실패 시 예약 재고를 release합니다.
+### 4. 결제 완료 후 재고 확정 또는 배송 생성 실패
 
-검증:
-- `OrdersServiceTest`
-  - 재고 예약 성공 시 주문 생성
-  - 재고 예약 실패 시 실패 상품 분리
-- `OrderCancelExecutorTest`
-  - 예약 주문 취소 시 `InventoryReservationService.release()` 호출
-- `OrdersServiceTest`
-  - 결제 완료 시 `InventoryReservationService.commit()` 호출
-- `scripts/test-02-stock-oversell-traffic.sh`
-  - 요청 5,000건, 동시성 400, 초기 재고 1,000개 기준 초과 판매 0건 검증
+- 재고 commit 중 하나라도 실패하면 order-service는 Saga를 `COMPENSATION_REQUESTED`로 바꾸고 아직 예약인 item은 release, 이미 확정된 item은 restock하는 취소 경로를 실행한다.
+- 취소 Outbox의 `ORDER_CANCELED`는 payment-service로 전달된다. 결제가 완료됐다면 seller order별 `PaymentRefund`와 `PAYMENT_REFUNDED` Outbox를 만든다.
+- shipping-service의 비동기 배송 생성 실패도 `SHIPPING_FAILED` Outbox로 발행한다. order-service는 해당 seller order만 취소하고 환불을 기다린다.
+- `PAYMENT_REFUNDED`가 모두 도착하면 Saga는 `COMPENSATED`가 된다. 예상 환불 개수보다 적으면 `REFUND_PENDING`에 남아 경보 대상이다.
 
-## 3. 결제 완료 이벤트 중복 수신
+### 5. 주문 취소가 결제 완료 웹훅보다 먼저 도착하는 순서 역전
 
-상황:
-- Kafka at-least-once 특성상 `PAYMENT_COMPLETED` 이벤트가 중복 전달될 수 있습니다.
+이 경합은 "예약 상태라 환불하지 않음"으로 끝내면 안 된다.
 
-위험:
-- 같은 결제 완료 이벤트를 여러 번 처리하면 재고 commit, 주문 확정, 후속 Outbox 이벤트가 중복 실행됩니다.
+1. payment-service가 `ORDER_CANCELED`를 수신했을 때 결제가 `PAYMENT_RESERVED`이면, 취소 payload를 `pending_cancellation_payload`에 저장하고 `cancellation_requested=true`로 남긴다.
+2. 이후 성공 웹훅이 오면 같은 트랜잭션에서 결제를 완료 처리한 뒤 pending 취소를 즉시 환불로 전환한다.
+3. 환불 Outbox가 만들어지고, 처리 후 pending payload와 취소 요청 flag는 제거된다.
+4. 웹훅이 먼저 도착한 경우에는 기존 완료 결제 환불 경로가 실행되므로 두 순서 모두 안전하다.
 
-대응:
-- `common-idempotency`의 `IdempotencyHandler`가 eventId를 `processed_event`에 먼저 저장합니다.
-- eventId가 이미 존재하면 `AlreadyProcessed`로 판단하고 비즈니스 action을 실행하지 않습니다.
-- 주문이 이미 `ORDER_CONFIRMED` 상태이면 재고 commit과 Outbox 기록을 다시 수행하지 않습니다.
+환불 레코드는 `(payment_id, seller_order_id)`의 중복 확인으로 한 번만 생성된다. 취소와 웹훅이 중복되어도 재환불되지 않는다.
 
-검증:
-- `IdempotencyHandlerTest`
-  - 최초 이벤트는 action 실행
-  - 중복 이벤트는 action 미실행
-  - action 예외는 호출자에게 전파
-- `OrdersServiceTest`
-  - 결제 완료 이벤트 처리 시 재고 commit 및 `ORDER_CONFIRMED` 이벤트 기록
-  - 이미 확정된 주문은 commit/outbox 재실행 방지
-- `scripts/test-04-payment-event-idempotency.sh`
-  - 동일 `PAYMENT_COMPLETED` 이벤트 대량 재주입 후 주문 확정 이벤트 1회 검증
+## 관측과 보존
 
-## 4. 결제 웹훅 중복 수신
+| 신호 | 의미 | 초기 대응 |
+|---|---|---|
+| `eventful_outbox_events{status="FAILED"} > 0` | 자동 재시도를 소진한 발행 실패 | 실패 Outbox 조회 → 원인 해결 → 안전 재처리 |
+| `eventful_saga_orders{status=~"COMPENSATION_REQUESTED|REFUND_PENDING|COMPENSATION_FAILED"} > 0` | 보상 절차가 완료되지 않음 | `order_saga.last_error`, 취소/환불 Outbox, 결제 상태를 orderId로 대조 |
+| `up == 0` | 서비스 scrape 실패 | 인스턴스·DB·Kafka 연결 상태 확인 |
 
-상황:
-- PG 또는 외부 결제 시스템이 같은 결제 결과 웹훅을 여러 번 보낼 수 있습니다.
+Prometheus rule은 `monitoring/prometheus/alerts.yml`에 있다. 현재 Compose 구성은 Prometheus UI에서 경보 상태를 확인하는 범위이며, Slack·PagerDuty 같은 외부 receiver는 운영 환경의 Alertmanager endpoint를 결정한 뒤 별도로 연결해야 한다.
 
-위험:
-- `PAYMENT_COMPLETED` 또는 `PAYMENT_FAILED` 이벤트가 중복 발행될 수 있습니다.
+- `SENT` Outbox는 기본 7일 후 정리한다. `FAILED`와 `PROCESSING`은 정리 대상이 아니다.
+- `processed_event`는 기본 30일 후 정리한다. 이 기간은 Kafka 재처리 가능 기간과 최대 장애 복구 시간보다 길게 운영해야 한다.
+- 두 정리 쿼리는 각각 `sent_at`, `processed_at` 인덱스를 사용한다.
 
-대응:
-- `payment-service`는 `PAYMENT_RESERVED` 상태인 결제만 웹훅 처리 대상으로 봅니다.
-- 이미 완료 또는 실패 처리된 결제는 웹훅을 다시 받아도 Outbox 이벤트를 기록하지 않습니다.
-
-검증:
-- `PaymentWebhookServiceTest`
-  - 성공 웹훅은 `PAYMENT_COMPLETED` 이벤트 기록
-  - 실패 웹훅은 `PAYMENT_FAILED` 이벤트 기록
-  - 예약 상태가 아닌 결제는 중복 웹훅을 받아도 이벤트 미기록
-  - 결제 정보가 없으면 예외 발생 및 이벤트 미기록
-
-## 5. 주문 취소 중복 요청
-
-상황:
-- 사용자가 취소 버튼을 여러 번 누르거나 네트워크 재시도로 동일 주문 취소 요청이 중복될 수 있습니다.
-
-위험:
-- 예약 재고 release 또는 확정 재고 보정이 여러 번 실행될 수 있습니다.
-- 환불 이벤트가 중복 발행될 수 있습니다.
-
-대응:
-- `OrderCancelService`는 Redisson 분산락으로 동일 주문 취소 실행을 직렬화합니다.
-- `OrderCancelExecutor`는 이미 취소된 seller order를 취소 대상에서 제외합니다.
-- 취소 가능한 대상이 없으면 재고 처리, 주문 저장, Outbox 기록을 수행하지 않습니다.
-
-검증:
-- `OrderCancelExecutorTest`
-  - 예약 주문 취소 시 재고 release
-  - 확정 주문 취소 시 재고 보정
-  - 이미 취소된 주문은 재고 처리와 Outbox 기록 미수행
-  - 판매자 주문 부분 취소 시 대상만 취소되고 주문 상태는 `ORDER_PARTIALLY_CANCELED`
-- `scripts/test-03-order-cancel-lock-traffic.sh`
-  - 대량 중복 취소 요청 중 1건만 성공하는지 검증
-
-## 6. 주문 취소 후 중복 환불
-
-상황:
-- `ORDER_CANCELED` 이벤트가 중복 전달되거나 같은 seller order 취소 이벤트가 다시 처리될 수 있습니다.
-
-위험:
-- 같은 seller order에 대해 환불 레코드와 `PAYMENT_REFUNDED` 이벤트가 중복 생성될 수 있습니다.
-
-대응:
-- `payment-service`는 `payment_id + seller_order_id` 기준으로 기존 환불 레코드를 확인합니다.
-- 이미 환불 레코드가 있으면 해당 seller order는 환불 대상에서 제외합니다.
-- 결제가 아직 완료되지 않은 상태이면 주문 취소 이벤트를 받아도 환불하지 않습니다.
-
-검증:
-- `PaymentServiceTest`
-  - 주문 취소 이벤트 수신 시 환불 레코드와 `PAYMENT_REFUNDED` 이벤트 생성
-  - 부분 환불이면 `PAYMENT_PARTIALLY_REFUNDED` 상태로 변경
-  - 기존 환불 레코드가 있으면 중복 환불 이벤트 미생성
-  - 완료되지 않은 결제는 환불 미수행
-
-## 7. Outbox 발행 실패
-
-상황:
-- DB 저장은 성공했지만 Kafka 발행이 일시적으로 실패할 수 있습니다.
-
-위험:
-- 이벤트가 유실되면 다음 서비스로 상태가 전파되지 않습니다.
-- 실패 메시지가 과도하게 길면 운영 로그와 DB 저장에 부담이 됩니다.
-
-대응:
-- 도메인 상태 변경과 Outbox 이벤트 저장을 같은 트랜잭션 안에서 처리합니다.
-- Outbox publisher가 `PENDING` 이벤트를 재시도합니다.
-- 발행 성공 시 `SENT`로 전이합니다.
-- 발행 실패 시 retry count를 증가시키고, 최대 재시도에 도달하면 `FAILED`로 전이합니다.
-- 실패 메시지는 2,000자로 제한합니다.
-
-검증:
-- `OutboxEventServiceTest`
-  - 이벤트 목록 저장
-  - `markAsSent()`가 `SENT` 전이를 repository에 위임
-  - `markAsFailed()`가 긴 에러 메시지를 2,000자로 제한
-  - 예외 메시지가 없으면 예외 클래스명을 `lastError`로 사용
-- `scripts/test-05-outbox-status-transition.sh`
-  - 상품 등록 Outbox 이벤트가 `PENDING`에서 발행 결과 상태로 전이되는지 검증
-
-## 8. 주문 예약 이벤트 중복 수신
-
-상황:
-- `ORDER_RESERVED` 이벤트가 payment-service에 중복 전달될 수 있습니다.
-
-위험:
-- 같은 주문에 대해 결제 예약 레코드가 중복 생성될 수 있습니다.
-
-대응:
-- `PaymentService.handleOrderCreated()`는 idempotency handler를 통해 eventId 중복을 방어합니다.
-- action 내부에서도 `orderId`로 기존 결제 레코드를 조회하고, 이미 존재하면 새 결제를 생성하지 않습니다.
-
-검증:
-- `PaymentServiceTest`
-  - `ORDER_RESERVED` 이벤트 수신 시 `PAYMENT_RESERVED` 결제 레코드 생성
-  - 이미 결제가 존재하면 결제 레코드 미생성
-
-## 테스트 근거 요약
-
-| 테스트 | 검증 수 |
-|---|---:|
-| `OrdersServiceTest` | 6 |
-| `OrderCancelExecutorTest` | 4 |
-| `PaymentServiceTest` | 6 |
-| `PaymentWebhookServiceTest` | 4 |
-| `IdempotencyHandlerTest` | 3 |
-| `OutboxEventServiceTest` | 4 |
-| 합계 | 27 |
-
-최근 검증 명령:
+## 검증 명령
 
 ```bash
-./gradlew :payment-service:test :common-outbox:test :common-idempotency:test :order-service:test
+# 핵심 단위·통합 모듈 검증
+./gradlew :order-service:test :payment-service:test :shipping-service:test \
+  :common-outbox:test :common-idempotency:test
+
+# 실행 환경이 기동된 경우 정상 흐름·동시성·중복 이벤트·Outbox 상태 전이 검증
+./scripts/verify.sh all
 ```
 
-결과:
-
-```text
-BUILD SUCCESSFUL
-27 tests, 0 failures
-```
+검증 결과는 `scripts/results/<run-id>/summary.md`와 `result.json`에 남는다. 장애 재현 중에는 `KEEP_TEST_DATA=1`로 실행해 DB 상태를 보존하고, 원인 확인이 끝난 뒤 명시적으로 정리한다.

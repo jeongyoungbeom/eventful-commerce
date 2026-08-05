@@ -8,8 +8,8 @@ import java.util.UUID
 
 
 interface OrdersRepository : JpaRepository<Orders, UUID> {
-    fun findByStatusAndExpiresAtBefore(
-        status: OrdersStatus,
+    fun findByStatusInAndExpiresAtBefore(
+        statuses: Collection<OrdersStatus>,
         expiresAt: Instant
     ): List<Orders>
 

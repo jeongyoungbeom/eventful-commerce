@@ -3,6 +3,7 @@ package com.eventfulcommerce.product.service
 import com.eventfulcommerce.common.BaseTimeEntity
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventService
+import com.eventfulcommerce.common.InventoryStockAdjustedPayload
 import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
@@ -99,7 +100,7 @@ class ProductServiceTest {
     fun `재고 변경은 PRODUCT_STOCK_UPDATED 아웃박스 이벤트를 기록한다`() {
         val sellerId = UUID.randomUUID()
         val product = productFixture(sellerId = sellerId, stock = 10)
-        every { productRepository.findById(product.id) } returns Optional.of(product)
+        every { productRepository.findByIdForUpdate(product.id) } returns product
 
         val response = productService.updateStock(product.id, delta = 5, sellerId = sellerId)
 
@@ -116,6 +117,39 @@ class ProductServiceTest {
                                 it.stockDelta == 5 &&
                                 it.newStock == 15
                         }
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `Order Redis 재고 변경 사실은 Product DB와 Redis 생략 플래그가 있는 Product Outbox로 반영된다`() {
+        val product = productFixture(sellerId = UUID.randomUUID(), stock = 10)
+        every { productRepository.findByIdForUpdate(product.id) } returns product
+
+        productService.applyInventoryStockAdjustment(
+            InventoryStockAdjustedPayload(
+                orderId = UUID.randomUUID(),
+                productId = product.id,
+                reservationId = UUID.randomUUID(),
+                stockDelta = -2,
+                reason = "RESERVED"
+            ),
+            Instant.now()
+        )
+
+        assertEquals(8, product.stock)
+        verify(exactly = 1) {
+            outboxEventService.record(
+                match<List<OutboxEvent>> { events ->
+                    events.single().let { event ->
+                        event.eventType == "PRODUCT_STOCK_UPDATED" &&
+                            objectMapper.readValue<ProductStockUpdatedPayload>(event.payload).let { payload ->
+                                payload.stockDelta == -2 &&
+                                    payload.newStock == 8 &&
+                                    payload.redisAlreadyAdjusted
+                            }
+                    }
                 }
             )
         }
@@ -149,7 +183,7 @@ class ProductServiceTest {
         val ownerId = UUID.randomUUID()
         val otherSellerId = UUID.randomUUID()
         val product = productFixture(sellerId = ownerId)
-        every { productRepository.findById(product.id) } returns Optional.of(product)
+        every { productRepository.findByIdForUpdate(product.id) } returns product
 
         assertThrows(ProductOwnershipException::class.java) {
             productService.updateStock(product.id, delta = 1, sellerId = otherSellerId)

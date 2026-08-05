@@ -1,5 +1,6 @@
 package com.eventfulcommerce.order.controller
 
+import com.eventfulcommerce.order.dto.LockTestResponse
 import com.eventfulcommerce.order.service.DistributedLockTestService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
@@ -23,14 +24,14 @@ class LockTestController(
     fun testBasicLock(
         @RequestParam orderId: UUID,
         @RequestParam(defaultValue = "5") holdTime: Long
-    ): Map<String, Any> {
+    ): LockTestResponse {
         val success = lockTestService.testBasicLock(orderId, holdTime)
         
-        return mapOf(
-            "success" to success,
-            "orderId" to orderId,
-            "holdTime" to holdTime,
-            "message" to if (success) "락 획득 및 해제 성공" else "락 획득 실패"
+        return LockTestResponse(
+            success = success,
+            orderId = orderId,
+            holdTime = holdTime,
+            message = if (success) "락 획득 및 해제 성공" else "락 획득 실패"
         )
     }
 
@@ -44,14 +45,14 @@ class LockTestController(
     fun testNoWaitLock(
         @RequestParam orderId: UUID,
         @RequestParam(defaultValue = "10") holdTime: Long
-    ): Map<String, Any> {
+    ): LockTestResponse {
         val success = lockTestService.testNoWaitLock(orderId, holdTime)
         
-        return mapOf(
-            "success" to success,
-            "orderId" to orderId,
-            "holdTime" to holdTime,
-            "message" to if (success) "락 즉시 획득 성공" else "락 즉시 실패 (이미 사용 중)"
+        return LockTestResponse(
+            success = success,
+            orderId = orderId,
+            holdTime = holdTime,
+            message = if (success) "락 즉시 획득 성공" else "락 즉시 실패 (이미 사용 중)"
         )
     }
 
@@ -65,14 +66,14 @@ class LockTestController(
     fun testWatchDog(
         @RequestParam orderId: UUID,
         @RequestParam(defaultValue = "35") holdTime: Int
-    ): Map<String, Any> {
+    ): LockTestResponse {
         val success = lockTestService.testWatchDog(orderId, holdTime)
         
-        return mapOf(
-            "success" to success,
-            "orderId" to orderId,
-            "holdTime" to holdTime,
-            "message" to if (success) "Watch Dog 테스트 성공" else "Watch Dog 테스트 실패"
+        return LockTestResponse(
+            success = success,
+            orderId = orderId,
+            holdTime = holdTime.toLong(),
+            message = if (success) "Watch Dog 테스트 성공" else "Watch Dog 테스트 실패"
         )
     }
 }

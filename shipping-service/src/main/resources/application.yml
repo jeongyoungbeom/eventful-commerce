@@ -2,6 +2,8 @@ server:
   port: 8083
 
 spring:
+  profiles:
+    default: dev
   application:
     name: shipping-service
 
@@ -13,8 +15,14 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update  # 테이블 자동 생성/업데이트 (개발용)
+      ddl-auto: validate  # safe default; dev and docker profiles override this
     open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
 
   kafka:
     bootstrap-servers: localhost:9092
@@ -30,6 +38,12 @@ spring:
 outbox:
   topic: shipping-events
   polling-ms: 200
+
+dlt:
+  topics: order-events.DLT
+  operations:
+    enabled: ${DLT_OPERATIONS_ENABLED:false}
+    token: ${DLT_OPERATIONS_TOKEN:}
 
 shipping:
   completion-delay-ms: 10000  # 배송 완료까지 대기 시간 (ms), 테스트 시 줄여서 사용

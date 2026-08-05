@@ -6,4 +6,9 @@ import java.util.UUID
 
 interface PaymentRefundRepository : JpaRepository<PaymentRefund, UUID> {
     fun findByPaymentIdAndSellerOrderId(paymentId: UUID, sellerOrderId: UUID): PaymentRefund?
+
+    fun findByPaymentIdAndSellerOrderIdIn(
+        paymentId: UUID,
+        sellerOrderIds: Collection<UUID>
+    ): List<PaymentRefund>
 }

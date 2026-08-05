@@ -2,6 +2,8 @@ server:
   port: 8082
 
 spring:
+  profiles:
+    default: dev
   application:
     name: payment-service
 
@@ -13,11 +15,17 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update  # 테이블 자동 생성/업데이트 (개발용)
+      ddl-auto: validate  # safe default; dev and docker profiles override this
     properties:
       hibernate:
         format_sql: true
     open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
 
   kafka:
     bootstrap-servers: localhost:9092
@@ -37,6 +45,12 @@ spring:
 outbox:
   topic: payment-events
   polling-ms: 200
+
+dlt:
+  topics: order-events.DLT
+  operations:
+    enabled: ${DLT_OPERATIONS_ENABLED:false}
+    token: ${DLT_OPERATIONS_TOKEN:}
 
 management:
   endpoints:

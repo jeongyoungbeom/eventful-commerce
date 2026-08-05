@@ -26,7 +26,7 @@ class OrderItem(
     @Column(nullable = false)
     val totalAmount: Long,
 
-    @Column(nullable = false)
+    @Column(name = "reservation_id", nullable = false, unique = true)
     val reservationId: UUID,
 
     @Enumerated(EnumType.STRING)
@@ -37,4 +37,3 @@ class OrderItem(
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID
 }
-

@@ -12,7 +12,7 @@ class OutboxMetrics(
     private val meterRegistry: MeterRegistry
 ) {
     init {
-        listOf(OutboxStatus.PENDING, OutboxStatus.FAILED).forEach { status ->
+        listOf(OutboxStatus.PENDING, OutboxStatus.PROCESSING, OutboxStatus.FAILED).forEach { status ->
             Gauge.builder("eventful.outbox.events") {
                 outboxEventRepository.countByStatus(status).toDouble()
             }

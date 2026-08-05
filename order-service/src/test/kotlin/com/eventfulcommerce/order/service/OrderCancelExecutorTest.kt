@@ -44,8 +44,12 @@ class OrderCancelExecutorTest {
         objectMapper = jacksonObjectMapper()
 
         every { ordersRepository.save(any<Orders>()) } answers { firstArg() }
-        every { inventoryReservationService.release(any<String>(), any<UUID>(), any<Int>()) } just Runs
-        every { inventoryReservationService.adjustStock(any<String>(), any<Int>()) } just Runs
+        every {
+            inventoryReservationService.release(any<String>(), any<UUID>(), any<Int>())
+        } returns InventoryReservationActionResult.APPLIED
+        every {
+            inventoryReservationService.restock(any<String>(), any<UUID>(), any<Int>())
+        } returns InventoryReservationActionResult.APPLIED
         every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
 
         orderCancelExecutor = OrderCancelExecutor(
@@ -55,6 +59,44 @@ class OrderCancelExecutorTest {
             outboxEventService = outboxEventService,
             objectMapper = objectMapper
         )
+    }
+
+    @Test
+    fun `inventory release failure prevents order cancellation and outbox recording`() {
+        val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.RESERVED))
+        val item = order.sellerOrders.single().items.single()
+        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every {
+            inventoryReservationService.release(item.productId.toString(), item.reservationId, item.quantity)
+        } returns InventoryReservationActionResult.NOT_FOUND
+
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            orderCancelExecutor.execute(order.id, "inventory release failure")
+        }
+
+        assertEquals(OrdersStatus.ORDER_RESERVED, order.status)
+        assertEquals(SellerOrderStatus.RESERVED, order.sellerOrders.single().status)
+        verify(exactly = 0) { ordersRepository.save(order) }
+        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+    }
+
+    @Test
+    fun `confirmed inventory restock failure prevents cancellation and outbox recording`() {
+        val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.CONFIRMED))
+        val item = order.sellerOrders.single().items.single()
+        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every {
+            inventoryReservationService.restock(item.productId.toString(), item.reservationId, item.quantity)
+        } returns InventoryReservationActionResult.CORRUPTED
+
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            orderCancelExecutor.execute(order.id, "inventory restock failure")
+        }
+
+        assertEquals(OrdersStatus.ORDER_CONFIRMED, order.status)
+        assertEquals(SellerOrderStatus.CONFIRMED, order.sellerOrders.single().status)
+        verify(exactly = 0) { ordersRepository.save(order) }
+        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
     }
 
     @Test
@@ -77,7 +119,7 @@ class OrderCancelExecutorTest {
                 item.quantity
             )
         }
-        verify(exactly = 0) { inventoryReservationService.adjustStock(any<String>(), any<Int>()) }
+        verify(exactly = 0) { inventoryReservationService.restock(any<String>(), any<UUID>(), any<Int>()) }
         verify(exactly = 1) { ordersRepository.save(order) }
         verify(exactly = 1) {
             outboxEventService.record(
@@ -108,10 +150,10 @@ class OrderCancelExecutorTest {
             inventoryReservationService.release(any<String>(), any<UUID>(), any<Int>())
         }
         verify(exactly = 1) {
-            inventoryReservationService.adjustStock(item.productId.toString(), item.quantity)
+            inventoryReservationService.restock(item.productId.toString(), item.reservationId, item.quantity)
         }
         verify(exactly = 1) { ordersRepository.save(order) }
-        verify(exactly = 1) { outboxEventService.record(any<List<OutboxEvent>>()) }
+        verify(exactly = 2) { outboxEventService.record(any<List<OutboxEvent>>()) }
     }
 
     @Test
@@ -128,7 +170,7 @@ class OrderCancelExecutorTest {
         verify(exactly = 0) {
             inventoryReservationService.release(any<String>(), any<UUID>(), any<Int>())
         }
-        verify(exactly = 0) { inventoryReservationService.adjustStock(any<String>(), any<Int>()) }
+        verify(exactly = 0) { inventoryReservationService.restock(any<String>(), any<UUID>(), any<Int>()) }
         verify(exactly = 0) { ordersRepository.save(any<Orders>()) }
         verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
     }

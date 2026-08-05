@@ -1,5 +1,8 @@
 package com.eventfulcommerce.common
 
 enum class OutboxStatus {
-    PENDING,SENT,FAILED
+    PENDING,
+    PROCESSING,
+    SENT,
+    FAILED
 }

@@ -1,5 +1,6 @@
 package com.eventfulcommerce.notification.message
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OrderCanceledPayload
 import com.eventfulcommerce.common.OrderReservedPayload
 import com.eventfulcommerce.common.OutboxEventMessage
@@ -12,11 +13,13 @@ import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
 
 private val logger = KotlinLogging.logger {}
+private val supportedOrderNotificationEvents = setOf("ORDER_RESERVED", "ORDER_CANCELED")
 
 @Component
 class OrderEventsConsumer(
     private val objectMapper: ObjectMapper,
-    private val notificationService: NotificationService
+    private val notificationService: NotificationService,
+    private val idempotencyHandler: IdempotencyHandler
 ) {
 
     @KafkaListener(topics = ["order-events"], groupId = "notification-service-group")
@@ -25,11 +28,18 @@ class OrderEventsConsumer(
         
         try {
             val eventMessage = objectMapper.readValue(value, OutboxEventMessage::class.java)
-            
-            when (eventMessage.eventType) {
-                "ORDER_RESERVED" -> handleOrderReserved(eventMessage)
-                "ORDER_CANCELED" -> handleOrderCanceled(eventMessage)
-                else -> logger.warn { "⚠️ 알 수 없는 이벤트 타입: ${eventMessage.eventType}" }
+
+            if (eventMessage.eventType !in supportedOrderNotificationEvents) {
+                logger.warn { "Unsupported order notification event: ${eventMessage.eventType}" }
+                return
+            }
+
+            idempotencyHandler.executeIdempotent(eventMessage.eventId) {
+                when (eventMessage.eventType) {
+                    "ORDER_RESERVED" -> handleOrderReserved(eventMessage)
+                    "ORDER_CANCELED" -> handleOrderCanceled(eventMessage)
+                    else -> logger.warn { "⚠️ 알 수 없는 이벤트 타입: ${eventMessage.eventType}" }
+                }
             }
         } catch (e: Exception) {
             logger.error(e) { "❌ Order 이벤트 처리 실패: $value" }
@@ -42,7 +52,7 @@ class OrderEventsConsumer(
 
         // 구매자 알림
         val (buyerTitle, buyerMessage) = NotificationTemplate.orderReserved(payload.orderId)
-        notificationService.createAndSend(
+        notificationService.create(
             userId = payload.userId,
             type = NotificationType.ORDER_RESERVED,
             title = buyerTitle,
@@ -56,7 +66,7 @@ class OrderEventsConsumer(
             val (sellerTitle, sellerMessage) = NotificationTemplate.sellerOrderReceived(
                 payload.orderId, sellerOrder.paymentAmount, quantity
             )
-            notificationService.createAndSend(
+            notificationService.create(
                 userId = sellerOrder.sellerId,
                 type = NotificationType.ORDER_RESERVED,
                 title = sellerTitle,
@@ -73,7 +83,7 @@ class OrderEventsConsumer(
 
         // 구매자 알림
         val (buyerTitle, buyerMessage) = NotificationTemplate.orderCanceled(payload.orderId, payload.reason)
-        notificationService.createAndSend(
+        notificationService.create(
             userId = payload.userId,
             type = NotificationType.ORDER_CANCELED,
             title = buyerTitle,
@@ -83,7 +93,7 @@ class OrderEventsConsumer(
 
         payload.canceledSellerOrders.forEach { sellerOrder ->
             val (sellerTitle, sellerMessage) = NotificationTemplate.sellerOrderCanceled(payload.orderId, payload.reason)
-            notificationService.createAndSend(
+            notificationService.create(
                 userId = sellerOrder.sellerId,
                 type = NotificationType.ORDER_CANCELED,
                 title = sellerTitle,

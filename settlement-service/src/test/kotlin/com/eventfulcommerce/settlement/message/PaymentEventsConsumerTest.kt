@@ -96,6 +96,16 @@ class PaymentEventsConsumerTest {
         verify(exactly = 1) { settlementService.applyRefund(payload.sellerOrderId, payload.amount) }
     }
 
+    @Test
+    fun `unsupported payment event is not claimed as processed`() {
+        consumer.consume(message("PAYMENT_UNKNOWN", emptyMap<String, String>()))
+
+        verify(exactly = 0) {
+            idempotencyHandler.executeIdempotent(any<UUID>(), any<() -> Unit>())
+        }
+        verify(exactly = 0) { settlementService.applyRefund(any(), any()) }
+    }
+
     private fun message(eventType: String, payload: Any): String =
         objectMapper.writeValueAsString(
             OutboxEventMessage(

@@ -23,6 +23,11 @@ class PaymentEventsConsumer(
         val event = objectMapper.readTree(message)
         val eventType = event["eventType"]?.asText() ?: return
 
+        if (eventType !in SUPPORTED_EVENT_TYPES) {
+            logger.warn { "Ignoring unsupported payment event: eventType=$eventType" }
+            return
+        }
+
         val eventId = UUID.fromString(event["eventId"].asText())
 
         idempotencyHandler.executeIdempotent(eventId) {
@@ -50,5 +55,9 @@ class PaymentEventsConsumer(
                 }
             }
         }
+    }
+
+    private companion object {
+        val SUPPORTED_EVENT_TYPES = setOf("PAYMENT_COMPLETED", "PAYMENT_REFUNDED")
     }
 }

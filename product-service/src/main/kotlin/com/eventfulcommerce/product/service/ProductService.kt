@@ -3,6 +3,8 @@ package com.eventfulcommerce.product.service
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventService
 import com.eventfulcommerce.common.OutboxStatus
+import com.eventfulcommerce.common.InventoryStockAdjustedPayload
+import com.eventfulcommerce.common.InventoryStockSnapshotPayload
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
 import com.eventfulcommerce.common.ProductStockUpdatedPayload
@@ -21,6 +23,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
+import java.time.Instant
 import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
@@ -81,7 +84,7 @@ class ProductService(
 
     @Transactional
     fun updateStock(productId: UUID, delta: Int, sellerId: UUID): ProductResponse {
-        val product = getOwnedProduct(productId, sellerId)
+        val product = getOwnedProductForStockUpdate(productId, sellerId)
         product.adjustStock(delta)
 
         val payload = ProductStockUpdatedPayload(
@@ -101,6 +104,62 @@ class ProductService(
 
         logger.info { "재고 변경: productId=$productId, delta=$delta, newStock=${product.stock}" }
         return ProductResponse.from(product)
+    }
+
+    /** Applies an Order-side Redis transition to Product DB exactly once in the consumer transaction. */
+    @Transactional
+    fun applyInventoryStockAdjustment(payload: InventoryStockAdjustedPayload, occurredAt: Instant) {
+        val product = productRepository.findByIdForUpdate(payload.productId)
+            ?: throw ProductNotFoundException(payload.productId)
+        // A newer absolute snapshot already includes this older delta.
+        if (product.inventorySnapshotAt?.let { !occurredAt.isAfter(it) } == true) return
+        product.adjustStock(payload.stockDelta)
+        if (product.lastInventoryAdjustmentAt == null || occurredAt.isAfter(product.lastInventoryAdjustmentAt)) {
+            product.lastInventoryAdjustmentAt = occurredAt
+        }
+        recordRedisSynchronizedStockUpdate(product, payload.stockDelta)
+        logger.info {
+            "Inventory ledger applied to Product DB: productId=${payload.productId}, orderId=${payload.orderId}, " +
+                "reservationId=${payload.reservationId}, delta=${payload.stockDelta}, reason=${payload.reason}"
+        }
+    }
+
+    /**
+     * Absolute reconciliation is only allowed after Order service verified that there are no
+     * active Redis holds. Older snapshots cannot overwrite a newer one.
+     */
+    @Transactional
+    fun applyInventoryStockSnapshot(payload: InventoryStockSnapshotPayload, occurredAt: Instant) {
+        val product = productRepository.findByIdForUpdate(payload.productId)
+            ?: throw ProductNotFoundException(payload.productId)
+        if (product.inventorySnapshotAt?.let { !occurredAt.isAfter(it) } == true) return
+        // A snapshot made before the latest delta must not overwrite that newer delta.
+        if (product.lastInventoryAdjustmentAt?.let { !occurredAt.isAfter(it) } == true) return
+
+        val delta = payload.availableStock - product.stock
+        product.replaceStock(payload.availableStock, occurredAt)
+        if (delta != 0) recordRedisSynchronizedStockUpdate(product, delta)
+        logger.warn {
+            "Inventory snapshot reconciled Product DB: productId=${payload.productId}, " +
+                "availableStock=${payload.availableStock}, delta=$delta"
+        }
+    }
+
+    private fun recordRedisSynchronizedStockUpdate(product: Product, stockDelta: Int) {
+        val payload = ProductStockUpdatedPayload(
+            productId = product.id,
+            sellerId = product.sellerId,
+            stockDelta = stockDelta,
+            newStock = product.stock,
+            redisAlreadyAdjusted = true
+        )
+        outboxEventService.record(listOf(OutboxEvent(
+            aggregateType = "PRODUCT",
+            aggregateId = product.id,
+            eventType = "PRODUCT_STOCK_UPDATED",
+            payload = objectMapper.writeValueAsString(payload),
+            status = OutboxStatus.PENDING
+        )))
     }
 
     @Transactional
@@ -142,6 +201,13 @@ class ProductService(
     fun getMyProducts(sellerId: UUID): List<ProductResponse> =
         productRepository.findBySellerIdAndStatus(sellerId, ProductStatus.ACTIVE)
             .map { ProductResponse.from(it) }
+
+    private fun getOwnedProductForStockUpdate(productId: UUID, sellerId: UUID): Product {
+        val product = productRepository.findByIdForUpdate(productId)
+            ?: throw ProductNotFoundException(productId)
+        if (product.sellerId != sellerId) throw ProductOwnershipException(productId)
+        return product
+    }
 
     private fun getOwnedProduct(productId: UUID, sellerId: UUID): Product {
         val product = productRepository.findById(productId)

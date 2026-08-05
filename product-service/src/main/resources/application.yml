@@ -2,6 +2,8 @@ server:
   port: 8086
 
 spring:
+  profiles:
+    default: dev
   application:
     name: product-service
 
@@ -18,20 +20,37 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         format_sql: true
     open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
 
   kafka:
     bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: product-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 outbox:
   topic: product-events
+
+dlt:
+  topics: order-events.DLT
+  operations:
+    enabled: ${DLT_OPERATIONS_ENABLED:false}
+    token: ${DLT_OPERATIONS_TOKEN:}
 
 jwt:
   secret: ${JWT_SECRET:}

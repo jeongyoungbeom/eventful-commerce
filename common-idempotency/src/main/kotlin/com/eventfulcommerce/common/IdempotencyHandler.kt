@@ -2,8 +2,8 @@ package com.eventfulcommerce.common
 
 import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import org.slf4j.LoggerFactory
-import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 private val logger = LoggerFactory.getLogger(IdempotencyHandler::class.java)
@@ -12,16 +12,18 @@ private val logger = LoggerFactory.getLogger(IdempotencyHandler::class.java)
 class IdempotencyHandler(
     private val processedEventRepository: ProcessedEventRepository
 ) {
+    @Transactional(rollbackFor = [Exception::class])
     fun <T> executeIdempotent(eventId: UUID, action: () -> T): IdempotencyResult<T> {
-        // save()의 DataIntegrityViolationException만 "중복 이벤트"로 판단
-        try {
-            processedEventRepository.save(ProcessedEvent(eventId))
-        } catch (e: DataIntegrityViolationException) {
+        val insertedRows = processedEventRepository.insertIfAbsent(eventId)
+        if (insertedRows == 0) {
             logger.debug("이미 처리된 이벤트: eventId={}", eventId)
             return IdempotencyResult.AlreadyProcessed
         }
+        check(insertedRows == 1) {
+            "processed_event insert returned an unexpected row count: eventId=$eventId, rows=$insertedRows"
+        }
 
-        // action()의 예외는 그대로 전파 — 호출자(Kafka consumer)가 처리
+        // marker와 action은 같은 DB 트랜잭션이다. action 실패 시 marker도 함께 롤백된다.
         return try {
             val result = action()
             logger.debug("이벤트 처리 완료: eventId={}", eventId)

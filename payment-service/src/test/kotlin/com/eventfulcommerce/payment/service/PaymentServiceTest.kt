@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
@@ -169,6 +170,7 @@ class PaymentServiceTest {
             argThat<List<OutboxEvent>> { events ->
                 events.size == 1 &&
                     events.single().aggregateType == "PAYMENT_REFUND" &&
+                    events.single().aggregateId == payment.id &&
                     events.single().eventType == "PAYMENT_REFUNDED" &&
                     objectMapper.readValue(events.single().payload, PaymentRefundedPayload::class.java).let {
                         it.paymentId == payment.id &&
@@ -258,7 +260,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    fun `완료되지 않은 결제는 주문 취소 이벤트를 받아도 환불하지 않는다`() {
+    fun `완료되지 않은 결제는 주문 취소를 보류하고 환불하지 않는다`() {
         val eventId = UUID.randomUUID()
         val payment = paymentFixture(
             orderId = UUID.randomUUID(),
@@ -277,10 +279,80 @@ class PaymentServiceTest {
         paymentService.handleOrderCanceled(orderCanceledMessage(eventId, payload))
 
         assertEquals(PaymentStatus.PAYMENT_RESERVED, payment.status)
+        assertEquals(true, payment.cancellationRequested)
+        assertEquals(payload.orderId, objectMapper.readValue(payment.pendingCancellationPayload, OrderCanceledPayload::class.java).orderId)
         verify(idempotencyHandler).executeIdempotent(eq(eventId), any<() -> Unit>())
         verify(paymentRefundRepository, never()).save(any<PaymentRefund>())
-        verify(paymentRepository, never()).save(any<Payment>())
+        verify(paymentRepository).save(payment)
         verify(outboxEventRepository, never()).saveAll(any<List<OutboxEvent>>())
+    }
+
+    @Test
+    fun `order cancellation is retried when its payment prerequisite is not visible yet`() {
+        val eventId = UUID.randomUUID()
+        val payload = orderCanceledPayload(
+            orderId = UUID.randomUUID(),
+            userId = UUID.randomUUID(),
+            refundAmount = 20_000
+        )
+        whenever(paymentRepository.findByOrderId(payload.orderId)).thenReturn(null)
+
+        assertThrows(IllegalStateException::class.java) {
+            paymentService.handleOrderCanceled(orderCanceledMessage(eventId, payload))
+        }
+
+        verify(paymentRefundRepository, never()).save(any<PaymentRefund>())
+        verify(outboxEventRepository, never()).saveAll(any<List<OutboxEvent>>())
+    }
+
+    @Test
+    fun `Saga reconciliation re-publishes an existing refund fact`() {
+        val eventId = UUID.randomUUID()
+        val payment = paymentFixture(
+            orderId = UUID.randomUUID(),
+            userId = UUID.randomUUID(),
+            amount = 20_000,
+            status = PaymentStatus.PAYMENT_REFUNDED
+        )
+        setField(payment, "id", UUID.randomUUID())
+        val payload = orderCanceledPayload(
+            orderId = payment.orderId,
+            userId = payment.userId,
+            refundAmount = 20_000
+        )
+        val existingRefund = PaymentRefund(
+            payment = payment,
+            orderId = payload.orderId,
+            sellerOrderId = payload.canceledSellerOrders.single().sellerOrderId,
+            sellerId = payload.canceledSellerOrders.single().sellerId,
+            amount = 20_000,
+            reason = "original cancellation"
+        )
+        setField(existingRefund, "id", UUID.randomUUID())
+        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(
+            paymentRefundRepository.findByPaymentIdAndSellerOrderIdIn(
+                payment.id,
+                listOf(payload.canceledSellerOrders.single().sellerOrderId)
+            )
+        ).thenReturn(listOf(existingRefund))
+
+        paymentService.handleOrderCancellationReconciliation(
+            OutboxEventMessage(
+                eventId = eventId,
+                aggregateType = "ORDER",
+                aggregateId = payload.orderId,
+                eventType = "ORDER_CANCELLATION_RECONCILIATION_REQUESTED",
+                occurredAt = Instant.now(),
+                payload = objectMapper.writeValueAsString(payload)
+            )
+        )
+
+        verify(outboxEventRepository).saveAll(
+            argThat<List<OutboxEvent>> { events ->
+                objectMapper.readValue(events.single().payload, PaymentRefundedPayload::class.java).refundId == existingRefund.id
+            }
+        )
     }
 
     private fun orderReservedMessage(eventId: UUID, payload: OrderReservedPayload) = OutboxEventMessage(
@@ -386,5 +458,24 @@ class PaymentServiceTest {
         val field = target.javaClass.getDeclaredField(fieldName)
         field.isAccessible = true
         field.set(target, value)
+    }
+    @Test
+    fun `payment reserved cancellation is stored until a successful webhook arrives`() {
+        val payment = paymentFixture(
+            orderId = UUID.randomUUID(),
+            userId = UUID.randomUUID(),
+            amount = 20_000,
+            status = PaymentStatus.PAYMENT_RESERVED
+        )
+        val payload = orderCanceledPayload(payment.orderId, payment.userId, 20_000)
+        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.save(any<Payment>())).thenAnswer { it.arguments[0] as Payment }
+
+        paymentService.handleOrderCanceled(orderCanceledMessage(UUID.randomUUID(), payload))
+
+        assertEquals(true, payment.cancellationRequested)
+        assertEquals(payload.orderId, objectMapper.readValue(payment.pendingCancellationPayload, OrderCanceledPayload::class.java).orderId)
+        verify(paymentRefundRepository, never()).save(any<PaymentRefund>())
+        verify(outboxEventRepository, never()).saveAll(any<List<OutboxEvent>>())
     }
 }

@@ -1,5 +1,6 @@
 package com.eventfulcommerce.notification.message
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.ShippingCompletedPayload
 import com.eventfulcommerce.common.ShippingStartedPayload
@@ -12,11 +13,13 @@ import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
 
 private val logger = KotlinLogging.logger {}
+private val supportedShippingNotificationEvents = setOf("SHIPPING_STARTED", "SHIPPING_COMPLETED")
 
 @Component
 class ShippingEventsConsumer(
     private val objectMapper: ObjectMapper,
-    private val notificationService: NotificationService
+    private val notificationService: NotificationService,
+    private val idempotencyHandler: IdempotencyHandler
 ) {
 
     @KafkaListener(topics = ["shipping-events"], groupId = "notification-service-group")
@@ -25,11 +28,18 @@ class ShippingEventsConsumer(
         
         try {
             val eventMessage = objectMapper.readValue(value, OutboxEventMessage::class.java)
-            
-            when (eventMessage.eventType) {
-                "SHIPPING_STARTED" -> handleShippingStarted(eventMessage)
-                "SHIPPING_COMPLETED" -> handleShippingCompleted(eventMessage)
-                else -> logger.warn { "⚠️ 알 수 없는 이벤트 타입: ${eventMessage.eventType}" }
+
+            if (eventMessage.eventType !in supportedShippingNotificationEvents) {
+                logger.warn { "Unsupported shipping notification event: ${eventMessage.eventType}" }
+                return
+            }
+
+            idempotencyHandler.executeIdempotent(eventMessage.eventId) {
+                when (eventMessage.eventType) {
+                    "SHIPPING_STARTED" -> handleShippingStarted(eventMessage)
+                    "SHIPPING_COMPLETED" -> handleShippingCompleted(eventMessage)
+                    else -> logger.warn { "⚠️ 알 수 없는 이벤트 타입: ${eventMessage.eventType}" }
+                }
             }
         } catch (e: Exception) {
             logger.error(e) { "❌ Shipping 이벤트 처리 실패: $value" }
@@ -45,7 +55,7 @@ class ShippingEventsConsumer(
             payload.trackingNumber
         )
         
-        notificationService.createAndSend(
+        notificationService.create(
             userId = payload.userId,
             type = NotificationType.SHIPPING_STARTED,
             title = title,
@@ -61,7 +71,7 @@ class ShippingEventsConsumer(
         
         val (title, message) = NotificationTemplate.shippingCompleted(payload.orderId)
         
-        notificationService.createAndSend(
+        notificationService.create(
             userId = payload.userId,
             type = NotificationType.SHIPPING_COMPLETED,
             title = title,

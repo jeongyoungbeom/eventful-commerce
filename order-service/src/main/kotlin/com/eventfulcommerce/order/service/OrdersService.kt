@@ -1,9 +1,9 @@
 package com.eventfulcommerce.order.service
 
 import com.eventfulcommerce.common.*
-import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.domain.entity.OrderItem
+import com.eventfulcommerce.order.request.OrdersRequest
 import com.eventfulcommerce.order.domain.entity.Orders
 import com.eventfulcommerce.order.domain.entity.SellerOrder
 import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
@@ -11,7 +11,10 @@ import com.eventfulcommerce.order.dto.FailedOrderItemResponse
 import com.eventfulcommerce.order.dto.OrderResponse
 import com.eventfulcommerce.order.dto.SellerOrderResponse
 import com.eventfulcommerce.order.exception.OrderForbiddenException
+import com.eventfulcommerce.order.exception.OrderIdempotencyConflictException
+import com.eventfulcommerce.order.exception.OrderIdempotencyInProgressException
 import com.eventfulcommerce.order.exception.OrderNotFoundException
+import com.eventfulcommerce.order.repository.OrderRequestIdempotencyRepository
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
 import com.eventfulcommerce.order.repository.SellerOrderRepository
@@ -21,7 +24,9 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.security.MessageDigest
 import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
@@ -29,6 +34,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class OrdersService(
     private val ordersRepository: OrdersRepository,
+    private val orderRequestIdempotencyRepository: OrderRequestIdempotencyRepository,
     private val sellerOrderRepository: SellerOrderRepository,
     private val productReadModelRepository: ProductReadModelRepository,
     private val outboxEventService: OutboxEventService,
@@ -36,13 +42,71 @@ class OrdersService(
     private val idempotencyHandler: IdempotencyHandler,
     private val objectMapper: ObjectMapper,
     private val orderCancelService: OrderCancelService,
+    private val orderSagaService: OrderSagaService,
     private val businessMetrics: EventfulBusinessMetrics,
-    @Value("\${order.commission-rate:0.1}") private val commissionRate: Double
+    @Value("\${order.commission-rate:0.1}") private val commissionRate: Double,
+    @Value("\${order.idempotency.retention-seconds:86400}")
+    private val idempotencyRetentionSeconds: Long
 ) {
     private val ttlSeconds = 10 * 60L
 
+    init {
+        require(idempotencyRetentionSeconds > 0) {
+            "order.idempotency.retention-seconds must be greater than zero"
+        }
+    }
+
     @Transactional
-    fun orders(request: OrdersRequest, userId: UUID): OrderResponse {
+    fun orders(
+        request: OrdersRequest,
+        userId: UUID,
+        idempotencyKey: String
+    ): OrderResponse {
+        val normalizedKey = idempotencyKey.trim().also {
+            require(it.isNotEmpty()) { "Idempotency-Key must not be blank" }
+            require(it.length <= MAX_IDEMPOTENCY_KEY_LENGTH) {
+                "Idempotency-Key must be at most $MAX_IDEMPOTENCY_KEY_LENGTH characters"
+            }
+        }
+        val requestHash = sha256(objectMapper.writeValueAsString(request))
+        val keyFingerprint = keyFingerprint(normalizedKey)
+        val recordId = UUID.nameUUIDFromBytes(
+            "$userId:$normalizedKey".toByteArray(StandardCharsets.UTF_8)
+        )
+        val now = Instant.now()
+
+        if (!orderRequestIdempotencyRepository.tryAcquireClaimLock("$userId:$normalizedKey")) {
+            throw OrderIdempotencyInProgressException(keyFingerprint)
+        }
+        orderRequestIdempotencyRepository.deleteExpiredByUserIdAndIdempotencyKey(
+            userId = userId,
+            idempotencyKey = normalizedKey,
+            now = now
+        )
+
+        val claimed = orderRequestIdempotencyRepository.insertIfAbsent(
+            id = recordId,
+            userId = userId,
+            idempotencyKey = normalizedKey,
+            requestHash = requestHash,
+            expiresAt = now.plusSeconds(idempotencyRetentionSeconds)
+        )
+        if (claimed == 0) {
+            return replayStoredResponse(userId, normalizedKey, requestHash, keyFingerprint)
+        }
+        check(claimed == 1) { "Unexpected order idempotency claim result: $claimed" }
+
+        val response = createOrder(request, userId)
+        val completed = orderRequestIdempotencyRepository.complete(
+            id = recordId,
+            responseJson = objectMapper.writeValueAsString(response),
+            orderId = response.orderId
+        )
+        check(completed == 1) { "Order idempotency response was not stored: keyFingerprint=$keyFingerprint" }
+        return response
+    }
+
+    private fun createOrder(request: OrdersRequest, userId: UUID): OrderResponse {
         val order = ordersRepository.save(
             Orders(
                 userId = userId,
@@ -66,11 +130,13 @@ class OrdersService(
                 return@mapNotNull null
             }
 
+            val requestedReservationId = UUID.randomUUID()
             val reservationId = inventoryReservationService.reserve(
                 productId = product.productId.toString(),
                 orderId = order.id,
                 quantity = itemRequest.quantity,
-                ttlSeconds = ttlSeconds
+                ttlSeconds = ttlSeconds,
+                reservationId = requestedReservationId
             )
 
             if (reservationId == null) {
@@ -151,6 +217,7 @@ class OrdersService(
 
         order.recomputeTotals()
         ordersRepository.save(order)
+        orderSagaService.initialize(order.id)
         recordOrderReserved(order)
         businessMetrics.increment("order.create", "reserved")
 
@@ -175,16 +242,28 @@ class OrdersService(
                 return@executeIdempotent
             }
 
-            order.sellerOrders.forEach { sellerOrder ->
-                sellerOrder.items.forEach { item ->
-                    inventoryReservationService.commit(item.productId.toString(), item.reservationId, item.quantity)
+            orderSagaService.markPaymentCompleted(order.id)
+            try {
+                order.sellerOrders.forEach { sellerOrder ->
+                    sellerOrder.items.forEach { item ->
+                        val result = inventoryReservationService.commit(
+                            item.productId.toString(),
+                            item.reservationId,
+                            item.quantity
+                        )
+                        check(result.successful) {
+                            "Inventory commit failed: orderId=${order.id}, productId=${item.productId}, " +
+                                "reservationId=${item.reservationId}, result=$result"
+                        }
+                        item.status = com.eventfulcommerce.order.domain.entity.OrderItemStatus.CONFIRMED
+                    }
+                    sellerOrder.confirm()
                 }
-                sellerOrder.confirm()
-            }
-            order.recomputeStatus()
-            ordersRepository.save(order)
+                order.recomputeStatus()
+                ordersRepository.save(order)
+                orderSagaService.markConfirmed(order.id)
 
-            val confirmedPayload = OrderConfirmedPayload(
+                val confirmedPayload = OrderConfirmedPayload(
                 orderId = order.id,
                 userId = order.userId,
                 totalAmount = order.totalPaymentAmount,
@@ -198,20 +277,64 @@ class OrdersService(
                 confirmedAt = Instant.now()
             )
 
-            outboxEventService.record(
-                listOf(
-                    OutboxEvent(
-                        aggregateType = OrdersStatus.ORDER.toString(),
-                        aggregateId = order.id,
-                        eventType = OrdersStatus.ORDER_CONFIRMED.toString(),
-                        payload = objectMapper.writeValueAsString(confirmedPayload),
-                        status = OutboxStatus.PENDING
+                outboxEventService.record(
+                    listOf(
+                        OutboxEvent(
+                            aggregateType = OrdersStatus.ORDER.toString(),
+                            aggregateId = order.id,
+                            eventType = OrdersStatus.ORDER_CONFIRMED.toString(),
+                            payload = objectMapper.writeValueAsString(confirmedPayload),
+                            status = OutboxStatus.PENDING
+                        )
                     )
                 )
-            )
-            businessMetrics.increment("order.payment", "confirmed")
+                businessMetrics.increment("order.payment", "confirmed")
+                logger.info { "주문 확정 완료: orderId=${order.id}" }
+            } catch (exception: Exception) {
+                orderSagaService.requestCompensation(order.id, exception)
+                when (orderCancelService.cancelForEvent(order.id, "SAGA_INVENTORY_CONFIRM_FAILED")) {
+                    OrderCancellationOutcome.CANCELED ->
+                        orderSagaService.markRefundPending(order.id, order.sellerOrders.size)
+                    OrderCancellationOutcome.ALREADY_CANCELED ->
+                        logger.info { "보상 취소가 이미 완료됨: orderId=${order.id}" }
+                    OrderCancellationOutcome.LOCK_UNAVAILABLE -> throw IllegalStateException(
+                        "Order cancellation lock is unavailable: orderId=${order.id}"
+                    )
+                }
+                businessMetrics.increment("order.payment", "compensation_requested")
+            }
+        }
+    }
 
-            logger.info { "주문 확정 완료: orderId=${order.id}" }
+    @Transactional
+    fun handlePaymentRefunded(value: OutboxEventMessage) {
+        idempotencyHandler.executeIdempotent(value.eventId) {
+            val payload = objectMapper.readValue(value.payload, PaymentRefundedPayload::class.java)
+            orderSagaService.markRefundReceived(payload.orderId, payload.sellerOrderId)
+        }
+    }
+
+    @Transactional
+    fun handleShippingFailed(value: OutboxEventMessage) {
+        idempotencyHandler.executeIdempotent(value.eventId) {
+            val payload = objectMapper.readValue(value.payload, ShippingFailedPayload::class.java)
+            when (
+                orderCancelService.cancelSellerOrderForEvent(
+                    payload.orderId,
+                    payload.sellerOrderId,
+                    "SAGA_SHIPPING_FAILED"
+                )
+            ) {
+                OrderCancellationOutcome.CANCELED -> {
+                    orderSagaService.requestCompensation(payload.orderId, IllegalStateException(payload.reason))
+                    orderSagaService.markRefundPending(payload.orderId, 1)
+                }
+                OrderCancellationOutcome.ALREADY_CANCELED ->
+                    logger.info { "배송 실패 대상 판매자 주문이 이미 취소됨: sellerOrderId=${payload.sellerOrderId}" }
+                OrderCancellationOutcome.LOCK_UNAVAILABLE -> throw IllegalStateException(
+                    "Seller order cancellation lock is unavailable: orderId=${payload.orderId}"
+                )
+            }
         }
     }
 
@@ -219,7 +342,9 @@ class OrdersService(
     fun handlePaymentFailed(value: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(value.eventId) {
             val payload = objectMapper.readValue(value.payload, PaymentFailedPayload::class.java)
-            orderCancelService.cancel(payload.orderId, "결제 실패")
+            if (orderCancelService.cancelForEvent(payload.orderId, "결제 실패") == OrderCancellationOutcome.LOCK_UNAVAILABLE) {
+                throw IllegalStateException("Order cancellation lock is unavailable: orderId=${payload.orderId}")
+            }
         }
     }
 
@@ -265,6 +390,33 @@ class OrdersService(
         return canceled
     }
 
+    private fun replayStoredResponse(
+        userId: UUID,
+        idempotencyKey: String,
+        requestHash: String,
+        keyFingerprint: String
+    ): OrderResponse {
+        val record = orderRequestIdempotencyRepository
+            .findByUserIdAndIdempotencyKey(userId, idempotencyKey)
+            ?: throw OrderIdempotencyInProgressException(keyFingerprint)
+
+        if (record.requestHash != requestHash) {
+            throw OrderIdempotencyConflictException(keyFingerprint)
+        }
+        val responseJson = record.responseJson
+            ?: throw OrderIdempotencyInProgressException(keyFingerprint)
+
+        logger.info { "Replaying stored order response: userId=$userId, keyFingerprint=$keyFingerprint" }
+        return objectMapper.readValue(responseJson, OrderResponse::class.java)
+    }
+
+    private fun sha256(value: String): String = MessageDigest
+        .getInstance("SHA-256")
+        .digest(value.toByteArray(StandardCharsets.UTF_8))
+        .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
+    private fun keyFingerprint(idempotencyKey: String): String = sha256(idempotencyKey).take(12)
+
     private fun recordOrderReserved(order: Orders) {
         val payload = OrderReservedPayload(
             orderId = order.id,
@@ -301,6 +453,26 @@ class OrdersService(
             createdAt = order.createdAt
         )
 
+        val inventoryEvents = order.sellerOrders.flatMap { sellerOrder ->
+            sellerOrder.items.map { item ->
+                OutboxEvent(
+                    aggregateType = "INVENTORY",
+                    aggregateId = item.productId,
+                    eventType = INVENTORY_STOCK_ADJUSTED,
+                    payload = objectMapper.writeValueAsString(
+                        InventoryStockAdjustedPayload(
+                            orderId = order.id,
+                            productId = item.productId,
+                            reservationId = item.reservationId,
+                            stockDelta = -item.quantity,
+                            reason = "RESERVED"
+                        )
+                    ),
+                    status = OutboxStatus.PENDING
+                )
+            }
+        }
+
         outboxEventService.record(
             listOf(
                 OutboxEvent(
@@ -310,8 +482,13 @@ class OrdersService(
                     payload = objectMapper.writeValueAsString(payload),
                     status = OutboxStatus.PENDING
                 )
-            )
+            ) + inventoryEvents
         )
+    }
+
+    private companion object {
+        const val MAX_IDEMPOTENCY_KEY_LENGTH = 128
+        const val INVENTORY_STOCK_ADJUSTED = "INVENTORY_STOCK_ADJUSTED"
     }
 }
 

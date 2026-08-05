@@ -58,7 +58,7 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 │  API Gateway (8080)              │
 │  • JWT 검증 (GatewayJwtFilter)   │
 │  • /api/** 라우팅                 │
-│  • Rate Limit (Redis)            │
+│  • Swagger UI/API Docs 집계       │
 └──────┬───────────────────────────┘
        │
        ├──────────────────────────────────────────────────┐
@@ -90,7 +90,7 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 │  • payment_service_db                • 재고 (Lua Script)  │
 │  • product_service_db                • 분산락 (Redisson)  │
 │  • user_service_db                   • Refresh Token      │
-│  • shipping_service_db               • Rate Limit         │
+│  • shipping_service_db               • User API RateLimit │
 │  • settlement_service_db                                   │
 │  • notification_service_db                                 │
 └────────────────────────────────────────────────────────────┘
@@ -144,7 +144,6 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 | API Docs | springdoc-openapi + Swagger UI |
 | Notification | Telegram Bot API |
 | Infrastructure | Docker, Docker Compose, Nginx |
-| CI/CD | GitHub Actions |
 
 ---
 
@@ -152,8 +151,8 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 
 | 서비스 | 포트 | 역할 |
 |---|---|---|
-| **api-gateway** | 8080 | JWT 검증, 라우팅 (`/api/**`), Rate Limit, Swagger UI/API Docs 집계 |
-| **user-service** | 8085 | 회원가입/로그인, JWT 발급, 판매자 등록, 토큰 블랙리스트 |
+| **api-gateway** | 8080 | JWT 검증, 라우팅 (`/api/**`), Swagger UI/API Docs 집계 |
+| **user-service** | 8085 | 회원가입/로그인, JWT 발급, 판매자 등록, 토큰 블랙리스트, IP 기반 Rate Limit |
 | **product-service** | 8086 | 상품 등록/수정/삭제 (SELLER 전용) |
 | **order-service** | 8081 | 다상품 주문, SellerOrder, 주문/부분취소, Redis 재고 예약, ProductReadModel |
 | **payment-service** | 8082 | 결제 레코드 관리, PG 웹훅 처리, 환불 이벤트 발행 |
@@ -162,6 +161,8 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 | **settlement-service** | 8087 | SellerOrder별 정산 생성, 환불 차감, Spring Batch 일별 확정 |
 
 공통 모듈: `common-auth` (JWT 공통), `common-outbox` (Outbox Publisher + 이벤트 Payload), `common-idempotency` (멱등성 처리)
+
+장애·보상 상태 전이, Outbox 재처리, 지표 확인 방법은 [운영 검증 시나리오](docs/failure-scenarios.md)에 정리했습니다.
 
 ---
 
@@ -207,10 +208,10 @@ fun orders(request: OrdersRequest, userId: UUID): OrderResponse {
     outboxEventService.record(orderReservedEvent)  // 같은 트랜잭션 — DB 저장 실패 시 이벤트도 롤백
     return OrderResponse(orderId = order.id, failedItems = failedItems)
 }
-// OutboxPublisher: @Scheduled(fixedDelay = 200) → Kafka 발행 후 published = true
+// OutboxPublisher: @Scheduled(fixedDelay = 200) → Kafka 발행 후 status = SENT
 ```
 
-이벤트 Payload만 필요한 consumer 서비스는 `outbox.publisher.enabled=false`로 Publisher Bean 생성을 끌 수 있습니다.
+이벤트 발행이 필요 없는 서비스는 `outbox.publisher.enabled=false`로 Publisher Bean 생성을 끌 수 있습니다. 현재 settlement-service는 결제/환불 이벤트를 소비해 정산 상태만 변경하므로 Publisher를 비활성화합니다.
 
 ### 3. CQRS — ProductReadModel
 
@@ -232,17 +233,19 @@ product-service → product-events → order-service/ProductEventsConsumer
 
 ```lua
 -- reserve.lua
-local stock = redis.call('GET', KEYS[1])
-local quantity = tonumber(ARGV[1])
-if tonumber(stock) >= quantity then
-    redis.call('DECRBY', KEYS[1], quantity)
-    redis.call('SETEX', KEYS[2], ARGV[2], quantity)  -- 예약 TTL 10분
-    return 1
+local stock = tonumber(redis.call('GET', KEYS[1]) or '-1')
+local quantity = tonumber(ARGV[2] or '1')
+if stock < quantity then
+  return 0
 end
-return 0
+
+redis.call('DECRBY', KEYS[1], quantity)
+redis.call('SET', KEYS[2], ARGV[1])      -- 예약 hold 생성
+redis.call('INCRBY', KEYS[3], quantity)  -- 예약 수량 집계
+return 1
 ```
 
-세 가지 연산: `reserve` (주문 예약) / `commit` (결제 확정 후 영구 차감) / `release` (취소·만료 시 복구)
+세 가지 연산: `reserve` (주문 예약) / `commit` (결제 확정 후 예약 hold 제거) / `release` (취소·만료 시 가용 재고 복구). 예약 hold는 Redis TTL에만 의존하지 않고 주문 만료 스케줄러와 취소 플로우에서 명시적으로 해제합니다.
 
 ### 5. Redisson 분산락 — 주문 취소 직렬화
 

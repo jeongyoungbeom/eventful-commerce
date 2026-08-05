@@ -1,11 +1,11 @@
 package com.eventfulcommerce.shipping.service
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OrderConfirmedPayload
 import com.eventfulcommerce.common.OrderConfirmedSellerPayload
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventService
 import com.eventfulcommerce.common.OutboxStatus
-import com.eventfulcommerce.common.ProcessedEvent
 import com.eventfulcommerce.common.ShippingCompletedPayload
 import com.eventfulcommerce.common.ShippingStartedPayload
 import com.eventfulcommerce.common.repository.ProcessedEventRepository
@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.springframework.dao.DataIntegrityViolationException
 import java.util.Optional
 import java.util.UUID
 
@@ -33,6 +32,8 @@ class ShippingServiceTest {
     private lateinit var processedEventRepository: ProcessedEventRepository
     private lateinit var shippingRepository: ShippingRepository
     private lateinit var outboxEventService: OutboxEventService
+    private lateinit var shippingCompletionService: ShippingCompletionService
+    private lateinit var shippingCompletionWorker: ShippingCompletionWorker
     private lateinit var shippingService: ShippingService
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -42,12 +43,15 @@ class ShippingServiceTest {
         processedEventRepository = mockk()
         shippingRepository = mockk()
         outboxEventService = mockk()
+        shippingCompletionService = ShippingCompletionService(shippingRepository, outboxEventService, objectMapper)
+        shippingCompletionWorker = mockk(relaxed = true)
         shippingService = ShippingService(
-            processedEventRepository = processedEventRepository,
+            idempotencyHandler = IdempotencyHandler(processedEventRepository),
             shippingRepository = shippingRepository,
             outboxEventService = outboxEventService,
             objectMapper = objectMapper,
-            completionDelayMs = 0
+            shippingCompletionService = shippingCompletionService,
+            shippingCompletionWorker = shippingCompletionWorker
         )
     }
 
@@ -56,7 +60,7 @@ class ShippingServiceTest {
         val payload = orderConfirmedPayload()
         val shippingSlot = slot<Shipping>()
 
-        every { processedEventRepository.save(any<ProcessedEvent>()) } answers { firstArg() }
+        every { processedEventRepository.insertIfAbsent(any()) } returns 1
         every { shippingRepository.existsBySellerOrderId(payload.sellerOrders.single().sellerOrderId) } returns false
         every { shippingRepository.save(capture(shippingSlot)) } answers {
             firstArg<Shipping>().also { setIfUninitialized(it, "id", UUID.randomUUID()) }
@@ -82,14 +86,13 @@ class ShippingServiceTest {
                 }
             )
         }
+        verify(exactly = 1) { shippingCompletionWorker.completeAfterDelay(shippingSlot.captured.id) }
     }
 
     @Test
     fun `이미 처리된 이벤트는 배송을 만들지 않는다`() {
         val payload = orderConfirmedPayload()
-        every {
-            processedEventRepository.save(any<ProcessedEvent>())
-        } throws DataIntegrityViolationException("duplicate")
+        every { processedEventRepository.insertIfAbsent(any()) } returns 0
 
         shippingService.handleOrderConfirmed(UUID.randomUUID(), objectMapper.writeValueAsString(payload))
 
@@ -100,7 +103,7 @@ class ShippingServiceTest {
     @Test
     fun `이미 배송이 있는 판매자 주문은 중복 배송을 생성하지 않는다`() {
         val payload = orderConfirmedPayload()
-        every { processedEventRepository.save(any<ProcessedEvent>()) } answers { firstArg() }
+        every { processedEventRepository.insertIfAbsent(any()) } returns 1
         every { shippingRepository.existsBySellerOrderId(payload.sellerOrders.single().sellerOrderId) } returns true
 
         shippingService.handleOrderConfirmed(UUID.randomUUID(), objectMapper.writeValueAsString(payload))
@@ -112,7 +115,7 @@ class ShippingServiceTest {
     @Test
     fun `배송 완료는 상태를 COMPLETED로 바꾸고 SHIPPING_COMPLETED 이벤트를 기록한다`() {
         val shipping = shippingFixture(status = ShippingStatus.STARTED)
-        every { shippingRepository.findById(shipping.id) } returns Optional.of(shipping)
+        every { shippingRepository.findByIdForUpdate(shipping.id) } returns shipping
         every { shippingRepository.save(any<Shipping>()) } answers { firstArg() }
         every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
 

@@ -9,7 +9,8 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 private val logger = KotlinLogging.logger { }
@@ -21,51 +22,89 @@ class OutboxPublisher(
     private val outboxEventService: OutboxEventService,
     private val kafkaTemplate: KafkaTemplate<String, String>,
     private val objectMapper: ObjectMapper,
+    private val properties: OutboxPublisherProperties,
     @Value("\${outbox.topic}")
     private val topic: String
 ) {
-    private val batchSize = 50
-    private val maxRetries = 10
-
     private val inFlight = AtomicInteger(0)
-    private val maxInFlight = 200
 
-    @Scheduled(fixedDelayString = "200")
-    @Transactional
+    @Scheduled(fixedDelayString = "\${outbox.publisher.polling-ms:200}")
     fun publishPending() {
-        if (inFlight.get() >= maxInFlight) return
+        properties.validate()
+        val now = Instant.now()
+        outboxEventService.recoverExpiredClaims(now)
 
-        val outboxEvents =
-            outboxEventRepository.findByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING, PageRequest.of(0, batchSize))
+        val capacity = properties.maxInFlight - inFlight.get()
+        if (capacity <= 0) return
 
-        outboxEvents.forEach { event ->
-            if (inFlight.incrementAndGet() > maxInFlight) {
+        val candidates = outboxEventRepository.findPublishable(
+            now = now,
+            pageable = PageRequest.of(0, minOf(properties.batchSize, capacity))
+        )
+
+        candidates.forEach { event ->
+            if (inFlight.incrementAndGet() > properties.maxInFlight) {
                 inFlight.decrementAndGet()
-                return
+                return@forEach
             }
 
-            val outboxEventMessage = OutboxEventMessage(
-                eventId = event.id,
-                aggregateType = event.aggregateType,
-                aggregateId = event.aggregateId,
-                eventType = event.eventType,
-                occurredAt = event.createdAt,
-                payload = event.payload
-            )
-            logger.debug { "이벤트 발행: eventType=${event.eventType}, aggregateId=${event.aggregateId}" }
-            val valueAsString = objectMapper.writeValueAsString(outboxEventMessage)
+            val claimToken = UUID.randomUUID()
+            if (!outboxEventService.claim(event.id, claimToken, now)) {
+                inFlight.decrementAndGet()
+                return@forEach
+            }
+            publish(event, claimToken)
+        }
+    }
 
-            kafkaTemplate.send(topic, event.aggregateId.toString(), valueAsString)
-                .whenComplete { _, ex ->
+    private fun publish(event: OutboxEvent, claimToken: UUID) {
+        val message = try {
+            objectMapper.writeValueAsString(
+                OutboxEventMessage(
+                    eventId = event.id,
+                    aggregateType = event.aggregateType,
+                    aggregateId = event.aggregateId,
+                    eventType = event.eventType,
+                    occurredAt = event.createdAt,
+                    payload = event.payload
+                )
+            )
+        } catch (exception: Exception) {
+            completeFailure(event, claimToken, exception)
+            return
+        }
+
+        try {
+            kafkaTemplate.send(topic, event.aggregateId.toString(), message)
+                .whenComplete { _, exception ->
                     try {
-                        if (ex == null) outboxEventService.markAsSent(event.id)
-                        else outboxEventService.markAsFailed(event.id, ex, maxRetries)
-                    } catch (e: Exception) {
-                        logger.error { "이벤트 상태 업데이트 실패: eventId=${event.id}, ${e.message}" }
+                        if (exception == null) {
+                            outboxEventService.markAsSent(event.id, claimToken)
+                        } else {
+                            outboxEventService.markAsFailed(event, claimToken, exception)
+                        }
+                    } catch (updateException: Exception) {
+                        logger.error(updateException) {
+                            "Outbox event state update failed: eventId=${event.id}"
+                        }
                     } finally {
                         inFlight.decrementAndGet()
                     }
                 }
+        } catch (exception: Exception) {
+            completeFailure(event, claimToken, exception)
+        }
+    }
+
+    private fun completeFailure(event: OutboxEvent, claimToken: UUID, exception: Throwable) {
+        try {
+            outboxEventService.markAsFailed(event, claimToken, exception)
+        } catch (updateException: Exception) {
+            logger.error(updateException) {
+                "Outbox event failure state update failed: eventId=${event.id}"
+            }
+        } finally {
+            inFlight.decrementAndGet()
         }
     }
 }

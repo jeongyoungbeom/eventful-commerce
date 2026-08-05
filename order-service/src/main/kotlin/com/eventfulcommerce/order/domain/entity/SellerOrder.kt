@@ -5,7 +5,15 @@ import jakarta.persistence.*
 import java.util.UUID
 
 @Entity
-@Table(name = "seller_orders")
+@Table(
+    name = "seller_orders",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uk_seller_orders_order_seller",
+            columnNames = ["order_id", "seller_id"]
+        )
+    ]
+)
 class SellerOrder(
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "order_id", nullable = false)
@@ -57,4 +65,3 @@ class SellerOrder(
         items.forEach { it.status = OrderItemStatus.CONFIRMED }
     }
 }
-

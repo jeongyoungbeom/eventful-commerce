@@ -1,11 +1,14 @@
 package com.eventfulcommerce.order.message
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
 import com.eventfulcommerce.common.ProductStockUpdatedPayload
+import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import com.eventfulcommerce.order.domain.entity.ProductReadModel
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
+import com.eventfulcommerce.order.service.InventoryReservationActionResult
 import com.eventfulcommerce.order.service.InventoryReservationService
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -25,6 +28,7 @@ import java.util.UUID
 class ProductEventsConsumerTest {
     private lateinit var productReadModelRepository: ProductReadModelRepository
     private lateinit var inventoryReservationService: InventoryReservationService
+    private lateinit var processedEventRepository: ProcessedEventRepository
     private lateinit var consumer: ProductEventsConsumer
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -33,7 +37,14 @@ class ProductEventsConsumerTest {
     fun setUp() {
         productReadModelRepository = mockk()
         inventoryReservationService = mockk()
-        consumer = ProductEventsConsumer(productReadModelRepository, inventoryReservationService, objectMapper)
+        processedEventRepository = mockk()
+        every { processedEventRepository.insertIfAbsent(any()) } returns 1
+        consumer = ProductEventsConsumer(
+            productReadModelRepository,
+            inventoryReservationService,
+            IdempotencyHandler(processedEventRepository),
+            objectMapper
+        )
     }
 
     @Test
@@ -99,7 +110,9 @@ class ProductEventsConsumerTest {
         val readModel = readModel(productId, stock = 10)
 
         every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
-        every { inventoryReservationService.adjustStock(productId.toString(), 5) } just Runs
+        every {
+            inventoryReservationService.adjustStockIdempotent(productId.toString(), any(), 5)
+        } returns InventoryReservationActionResult.APPLIED
 
         consumer.consume(
             message(
@@ -114,7 +127,65 @@ class ProductEventsConsumerTest {
         )
 
         assertEquals(15, readModel.stock)
-        verify(exactly = 1) { inventoryReservationService.adjustStock(productId.toString(), 5) }
+        verify(exactly = 1) {
+            inventoryReservationService.adjustStockIdempotent(productId.toString(), any(), 5)
+        }
+    }
+
+    @Test
+    fun `같은 PRODUCT_STOCK_UPDATED 이벤트를 다시 받으면 Redis 재고를 중복 조정하지 않는다`() {
+        val eventId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val readModel = readModel(productId, stock = 10)
+        val value = message(
+            eventType = "PRODUCT_STOCK_UPDATED",
+            payload = ProductStockUpdatedPayload(
+                productId = productId,
+                sellerId = readModel.sellerId,
+                stockDelta = 5,
+                newStock = 15
+            ),
+            eventId = eventId
+        )
+        every { processedEventRepository.insertIfAbsent(eventId) } returnsMany listOf(1, 0)
+        every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
+        every {
+            inventoryReservationService.adjustStockIdempotent(productId.toString(), eventId, 5)
+        } returns InventoryReservationActionResult.APPLIED
+
+        consumer.consume(value)
+        consumer.consume(value)
+
+        assertEquals(15, readModel.stock)
+        verify(exactly = 1) { productReadModelRepository.findById(productId) }
+        verify(exactly = 1) {
+            inventoryReservationService.adjustStockIdempotent(productId.toString(), eventId, 5)
+        }
+    }
+
+    @Test
+    fun `Order Redis에서 이미 반영된 재고 이벤트는 읽기 모델만 갱신하고 Redis를 다시 조정하지 않는다`() {
+        val productId = UUID.randomUUID()
+        val readModel = readModel(productId, stock = 10)
+        every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
+
+        consumer.consume(
+            message(
+                eventType = "PRODUCT_STOCK_UPDATED",
+                payload = ProductStockUpdatedPayload(
+                    productId = productId,
+                    sellerId = readModel.sellerId,
+                    stockDelta = -2,
+                    newStock = 8,
+                    redisAlreadyAdjusted = true
+                )
+            )
+        )
+
+        assertEquals(8, readModel.stock)
+        verify(exactly = 0) {
+            inventoryReservationService.adjustStockIdempotent(any<String>(), any(), any())
+        }
     }
 
     @Test
@@ -134,6 +205,21 @@ class ProductEventsConsumerTest {
         assertEquals("INACTIVE", readModel.status)
     }
 
+    @Test
+    fun `unsupported product event is not claimed as processed`() {
+        val eventId = UUID.randomUUID()
+
+        consumer.consume(
+            message(
+                eventType = "PRODUCT_UNKNOWN",
+                payload = emptyMap<String, String>(),
+                eventId = eventId
+            )
+        )
+
+        verify(exactly = 0) { processedEventRepository.insertIfAbsent(eventId) }
+    }
+
     private fun readModel(productId: UUID, stock: Int = 10) = ProductReadModel(
         productId = productId,
         sellerId = UUID.randomUUID(),
@@ -143,10 +229,10 @@ class ProductEventsConsumerTest {
         category = "FLOWERS"
     )
 
-    private fun message(eventType: String, payload: Any): String =
+    private fun message(eventType: String, payload: Any, eventId: UUID = UUID.randomUUID()): String =
         objectMapper.writeValueAsString(
             OutboxEventMessage(
-                eventId = UUID.randomUUID(),
+                eventId = eventId,
                 aggregateType = "PRODUCT",
                 aggregateId = UUID.randomUUID(),
                 eventType = eventType,

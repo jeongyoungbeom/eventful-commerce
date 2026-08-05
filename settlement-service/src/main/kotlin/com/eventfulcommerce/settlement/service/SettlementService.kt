@@ -59,7 +59,7 @@ class SettlementService(
     fun applyRefund(sellerOrderId: UUID, refundAmount: Long) {
         val settlement = settlementRepository.findBySellerOrderId(sellerOrderId) ?: run {
             logger.warn { "환불 대상 정산 없음: sellerOrderId=$sellerOrderId" }
-            return
+            throw IllegalStateException("Settlement prerequisite not found for refund: sellerOrderId=$sellerOrderId")
         }
 
         val refundPlatformFee = settlementConfig.calculatePlatformFee(refundAmount)

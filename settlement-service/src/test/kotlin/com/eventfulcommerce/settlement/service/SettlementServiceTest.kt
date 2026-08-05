@@ -9,6 +9,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.redisson.api.RLock
@@ -113,6 +114,16 @@ class SettlementServiceTest {
         assertEquals(settlement.id, result.settlementId)
         verify(exactly = 1) { settlementPayExecutor.execute(settlementId) }
         verify(exactly = 1) { lock.unlock() }
+    }
+
+    @Test
+    fun `refund is retried when settlement prerequisite is not visible yet`() {
+        val sellerOrderId = UUID.randomUUID()
+        every { settlementRepository.findBySellerOrderId(sellerOrderId) } returns null
+
+        assertThrows(IllegalStateException::class.java) {
+            settlementService.applyRefund(sellerOrderId, refundAmount = 5_000)
+        }
     }
 
     private fun settlementFixture(

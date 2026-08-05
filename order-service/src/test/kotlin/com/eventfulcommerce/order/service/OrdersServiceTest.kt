@@ -1,12 +1,16 @@
 package com.eventfulcommerce.order.service
 
 import com.eventfulcommerce.common.*
-import com.eventfulcommerce.order.domain.OrderItemRequest
-import com.eventfulcommerce.order.domain.OrdersRequest
 import com.eventfulcommerce.order.domain.OrdersStatus
+import com.eventfulcommerce.order.request.OrderItemRequest
+import com.eventfulcommerce.order.request.OrdersRequest
 import com.eventfulcommerce.order.domain.entity.Orders
+import com.eventfulcommerce.order.domain.entity.OrderRequestIdempotency
 import com.eventfulcommerce.order.domain.entity.ProductReadModel
 import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
+import com.eventfulcommerce.order.dto.OrderResponse
+import com.eventfulcommerce.order.exception.OrderIdempotencyConflictException
+import com.eventfulcommerce.order.repository.OrderRequestIdempotencyRepository
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
 import com.eventfulcommerce.order.repository.SellerOrderRepository
@@ -18,17 +22,20 @@ import io.mockk.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.time.Instant
 import java.util.*
 
 class OrdersServiceTest {
     private lateinit var ordersRepository: OrdersRepository
+    private lateinit var orderRequestIdempotencyRepository: OrderRequestIdempotencyRepository
     private lateinit var sellerOrderRepository: SellerOrderRepository
     private lateinit var productReadModelRepository: ProductReadModelRepository
     private lateinit var outboxEventService: OutboxEventService
     private lateinit var inventoryReservationService: InventoryReservationService
     private lateinit var idempotencyHandler: IdempotencyHandler
     private lateinit var orderCancelService: OrderCancelService
+    private lateinit var orderSagaService: OrderSagaService
     private lateinit var businessMetrics: EventfulBusinessMetrics
     private lateinit var objectMapper: ObjectMapper
     private lateinit var ordersService: OrdersService
@@ -36,12 +43,14 @@ class OrdersServiceTest {
     @BeforeEach
     fun setUp() {
         ordersRepository = mockk()
+        orderRequestIdempotencyRepository = mockk()
         sellerOrderRepository = mockk(relaxed = true)
         productReadModelRepository = mockk()
         outboxEventService = mockk()
         inventoryReservationService = mockk()
         idempotencyHandler = mockk(relaxed = true)
         orderCancelService = mockk(relaxed = true)
+        orderSagaService = mockk(relaxed = true)
         businessMetrics = mockk(relaxed = true)
         objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
@@ -50,6 +59,12 @@ class OrdersServiceTest {
         }
         every { ordersRepository.delete(any<Orders>()) } just Runs
         every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
+        every { orderRequestIdempotencyRepository.tryAcquireClaimLock(any()) } returns true
+        every { orderRequestIdempotencyRepository.deleteExpiredByUserIdAndIdempotencyKey(any(), any(), any()) } returns 0
+        every { orderRequestIdempotencyRepository.insertIfAbsent(any(), any(), any(), any(), any()) } returns 1
+        every { orderRequestIdempotencyRepository.complete(any(), any(), any()) } returns 1
+        every { orderCancelService.cancelForEvent(any(), any()) } returns OrderCancellationOutcome.CANCELED
+        every { orderCancelService.cancelSellerOrderForEvent(any(), any(), any()) } returns OrderCancellationOutcome.CANCELED
         every<IdempotencyResult<Unit>> {
             idempotencyHandler.executeIdempotent(any<UUID>(), any<() -> Unit>())
         } answers {
@@ -59,6 +74,7 @@ class OrdersServiceTest {
 
         ordersService = OrdersService(
             ordersRepository = ordersRepository,
+            orderRequestIdempotencyRepository = orderRequestIdempotencyRepository,
             sellerOrderRepository = sellerOrderRepository,
             productReadModelRepository = productReadModelRepository,
             outboxEventService = outboxEventService,
@@ -66,8 +82,10 @@ class OrdersServiceTest {
             idempotencyHandler = idempotencyHandler,
             objectMapper = objectMapper,
             orderCancelService = orderCancelService,
+            orderSagaService = orderSagaService,
             businessMetrics = businessMetrics,
-            commissionRate = 0.1
+            commissionRate = 0.1,
+            idempotencyRetentionSeconds = 86_400
         )
     }
 
@@ -80,12 +98,13 @@ class OrdersServiceTest {
         val product = productReadModel(productId, sellerId, price = 10_000)
         every { productReadModelRepository.findById(productId) } returns Optional.of(product)
         every<UUID?> {
-            inventoryReservationService.reserve(productId.toString(), any<UUID>(), 2, any<Long>())
+            inventoryReservationService.reserve(productId.toString(), any<UUID>(), 2, any<Long>(), any<UUID>())
         } returns reservationId
 
         val response = ordersService.orders(
             OrdersRequest(items = listOf(OrderItemRequest(productId = productId, quantity = 2))),
-            userId
+            userId,
+            "unit-order-success"
         )
 
         assertNotNull(response.orderId)
@@ -102,9 +121,12 @@ class OrdersServiceTest {
         verify(exactly = 1) {
             outboxEventService.record(
                 match<List<OutboxEvent>> {
-                    it.size == 1 &&
-                        it.single().eventType == OrdersStatus.ORDER_RESERVED.toString() &&
-                        it.single().status == OutboxStatus.PENDING
+                    it.size == 2 &&
+                        it.any { event -> event.eventType == OrdersStatus.ORDER_RESERVED.toString() && event.status == OutboxStatus.PENDING } &&
+                        it.any { event ->
+                            event.eventType == "INVENTORY_STOCK_ADJUSTED" &&
+                                event.aggregateId == productId && event.status == OutboxStatus.PENDING
+                        }
                 }
             )
         }
@@ -126,10 +148,10 @@ class OrdersServiceTest {
             productReadModel(failedProductId, sellerId, price = 8_000)
         )
         every<UUID?> {
-            inventoryReservationService.reserve(successProductId.toString(), any<UUID>(), 1, any<Long>())
+            inventoryReservationService.reserve(successProductId.toString(), any<UUID>(), 1, any<Long>(), any<UUID>())
         } returns reservationId
         every<UUID?> {
-            inventoryReservationService.reserve(failedProductId.toString(), any<UUID>(), 3, any<Long>())
+            inventoryReservationService.reserve(failedProductId.toString(), any<UUID>(), 3, any<Long>(), any<UUID>())
         } returns null
         every { inventoryReservationService.getAvailableStock(failedProductId.toString()) } returns 1L
 
@@ -140,7 +162,8 @@ class OrdersServiceTest {
                     OrderItemRequest(productId = failedProductId, quantity = 3)
                 )
             ),
-            userId
+            userId,
+            "unit-order-partial"
         )
 
         assertNotNull(response.orderId)
@@ -168,13 +191,14 @@ class OrdersServiceTest {
             productReadModel(productId, sellerId, price = 15_000)
         )
         every<UUID?> {
-            inventoryReservationService.reserve(productId.toString(), any<UUID>(), 5, any<Long>())
+            inventoryReservationService.reserve(productId.toString(), any<UUID>(), 5, any<Long>(), any<UUID>())
         } returns null
         every { inventoryReservationService.getAvailableStock(productId.toString()) } returns 0L
 
         val response = ordersService.orders(
             OrdersRequest(items = listOf(OrderItemRequest(productId = productId, quantity = 5))),
-            userId
+            userId,
+            "unit-order-failed"
         )
 
         assertNull(response.orderId)
@@ -200,7 +224,8 @@ class OrdersServiceTest {
 
         val response = ordersService.orders(
             OrdersRequest(items = listOf(OrderItemRequest(productId = productId, quantity = 1))),
-            userId
+            userId,
+            "unit-order-inactive"
         )
 
         assertNull(response.orderId)
@@ -208,7 +233,7 @@ class OrdersServiceTest {
         assertEquals("PRODUCT_NOT_AVAILABLE", response.failedItems.single().reason)
 
         verify(exactly = 0) {
-            inventoryReservationService.reserve(any<String>(), any<UUID>(), any<Int>(), any<Long>())
+            inventoryReservationService.reserve(any<String>(), any<UUID>(), any<Int>(), any<Long>(), any<UUID>())
         }
         verify(exactly = 1) { ordersRepository.delete(any<Orders>()) }
         verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
@@ -227,7 +252,9 @@ class OrdersServiceTest {
         )
 
         every { ordersRepository.findById(order.id) } returns Optional.of(order)
-        every { inventoryReservationService.commit(any<String>(), any<UUID>(), any<Int>()) } just Runs
+        every {
+            inventoryReservationService.commit(any<String>(), any<UUID>(), any<Int>())
+        } returns InventoryReservationActionResult.APPLIED
 
         ordersService.handlePaymentCompleted(paymentCompletedMessage)
 
@@ -250,6 +277,31 @@ class OrdersServiceTest {
                 }
             )
         }
+    }
+
+    @Test
+    fun `inventory commit failure requests compensation instead of confirming the order`() {
+        val order = reservedOrderFixture()
+        val eventId = UUID.randomUUID()
+        val paymentCompletedMessage = paymentCompletedMessage(
+            eventId = eventId,
+            orderId = order.id,
+            userId = order.userId
+        )
+
+        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every {
+            inventoryReservationService.commit(any<String>(), any<UUID>(), any<Int>())
+        } returns InventoryReservationActionResult.NOT_FOUND
+
+        ordersService.handlePaymentCompleted(paymentCompletedMessage)
+
+        assertEquals(OrdersStatus.ORDER_RESERVED, order.status)
+        assertEquals(SellerOrderStatus.RESERVED, order.sellerOrders.single().status)
+        verify(exactly = 0) { ordersRepository.save(order) }
+        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+        verify(exactly = 1) { orderSagaService.requestCompensation(order.id, any()) }
+        verify(exactly = 1) { orderSagaService.markRefundPending(order.id, 1) }
     }
 
     @Test
@@ -279,6 +331,141 @@ class OrdersServiceTest {
         verify(exactly = 0) { ordersRepository.save(any<Orders>()) }
         verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
     }
+
+    @Test
+    fun `shipping failure for an already canceled seller order does not start another compensation`() {
+        val order = reservedOrderFixture()
+        val sellerOrder = order.sellerOrders.single()
+        val event = OutboxEventMessage(
+            eventId = UUID.randomUUID(),
+            aggregateType = "SHIPPING",
+            aggregateId = UUID.randomUUID(),
+            eventType = "SHIPPING_FAILED",
+            occurredAt = Instant.now(),
+            payload = objectMapper.writeValueAsString(
+                ShippingFailedPayload(
+                    orderId = order.id,
+                    sellerOrderId = sellerOrder.id,
+                    userId = order.userId,
+                    reason = "carrier unavailable",
+                    failedAt = Instant.now()
+                )
+            )
+        )
+        every {
+            orderCancelService.cancelSellerOrderForEvent(order.id, sellerOrder.id, "SAGA_SHIPPING_FAILED")
+        } returns OrderCancellationOutcome.ALREADY_CANCELED
+
+        ordersService.handleShippingFailed(event)
+
+        verify(exactly = 0) { orderSagaService.requestCompensation(any(), any()) }
+        verify(exactly = 0) { orderSagaService.markRefundPending(any(), any()) }
+    }
+
+    @Test
+    fun `Idempotency-Key first request stores the final response`() {
+        val userId = UUID.randomUUID()
+        val sellerId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val reservationId = UUID.randomUUID()
+        val key = "order-create-001"
+        val request = OrdersRequest(items = listOf(OrderItemRequest(productId = productId, quantity = 1)))
+
+        every { productReadModelRepository.findById(productId) } returns Optional.of(
+            productReadModel(productId, sellerId, price = 10_000)
+        )
+        every<UUID?> {
+            inventoryReservationService.reserve(productId.toString(), any<UUID>(), 1, any<Long>(), any<UUID>())
+        } returns reservationId
+        every {
+            orderRequestIdempotencyRepository.insertIfAbsent(any<UUID>(), userId, key, any<String>(), any<Instant>())
+        } returns 1
+        every {
+            orderRequestIdempotencyRepository.complete(any<UUID>(), any<String>(), any<UUID>())
+        } returns 1
+
+        val response = ordersService.orders(request, userId, key)
+
+        assertNotNull(response.orderId)
+        verify(exactly = 1) {
+            orderRequestIdempotencyRepository.complete(any<UUID>(), any<String>(), response.orderId!!)
+        }
+        verify(exactly = 1) { outboxEventService.record(any<List<OutboxEvent>>()) }
+    }
+
+    @Test
+    fun `duplicate Idempotency-Key replays stored response without a second reservation`() {
+        val userId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val key = "order-create-002"
+        val request = OrdersRequest(items = listOf(OrderItemRequest(productId = productId, quantity = 1)))
+        val cachedResponse = cachedOrderResponse()
+        val record = OrderRequestIdempotency(
+            id = UUID.randomUUID(),
+            userId = userId,
+            idempotencyKey = key,
+            requestHash = requestHashFor(request),
+            responseJson = objectMapper.writeValueAsString(cachedResponse),
+            orderId = cachedResponse.orderId,
+            expiresAt = Instant.now().plusSeconds(86_400)
+        )
+        every {
+            orderRequestIdempotencyRepository.insertIfAbsent(any<UUID>(), userId, key, any<String>(), any<Instant>())
+        } returns 0
+        every { orderRequestIdempotencyRepository.findByUserIdAndIdempotencyKey(userId, key) } returns record
+
+        val response = ordersService.orders(request, userId, key)
+
+        assertEquals(cachedResponse, response)
+        verify(exactly = 0) { productReadModelRepository.findById(any()) }
+        verify(exactly = 0) { ordersRepository.save(any<Orders>()) }
+        verify(exactly = 0) { inventoryReservationService.reserve(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+    }
+
+    @Test
+    fun `Idempotency-Key reused with another request is rejected`() {
+        val userId = UUID.randomUUID()
+        val key = "order-create-003"
+        val request = OrdersRequest(items = listOf(OrderItemRequest(productId = UUID.randomUUID(), quantity = 1)))
+        val record = OrderRequestIdempotency(
+            id = UUID.randomUUID(),
+            userId = userId,
+            idempotencyKey = key,
+            requestHash = "different-request-hash",
+            expiresAt = Instant.now().plusSeconds(86_400)
+        )
+        every {
+            orderRequestIdempotencyRepository.insertIfAbsent(any<UUID>(), userId, key, any<String>(), any<Instant>())
+        } returns 0
+        every { orderRequestIdempotencyRepository.findByUserIdAndIdempotencyKey(userId, key) } returns record
+
+        assertThrows<OrderIdempotencyConflictException> {
+            ordersService.orders(request, userId, key)
+        }
+
+        verify(exactly = 0) { ordersRepository.save(any<Orders>()) }
+        verify(exactly = 0) { inventoryReservationService.reserve(any(), any(), any(), any(), any()) }
+    }
+
+    private fun cachedOrderResponse() = OrderResponse(
+        orderId = UUID.randomUUID(),
+        totalItemAmount = 10_000,
+        totalDeliveryFee = 0,
+        totalPaymentAmount = 10_000,
+        totalCommissionAmount = 1_000,
+        totalSettlementAmount = 9_000,
+        status = OrdersStatus.ORDER_RESERVED,
+        expiresAt = Instant.parse("2026-08-05T00:10:00Z"),
+        sellerOrders = emptyList(),
+        createdAt = Instant.parse("2026-08-05T00:00:00Z"),
+        updatedAt = Instant.parse("2026-08-05T00:00:00Z")
+    )
+
+    private fun requestHashFor(request: OrdersRequest): String = java.security.MessageDigest
+        .getInstance("SHA-256")
+        .digest(objectMapper.writeValueAsString(request).toByteArray(Charsets.UTF_8))
+        .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     private fun productReadModel(
         productId: UUID,

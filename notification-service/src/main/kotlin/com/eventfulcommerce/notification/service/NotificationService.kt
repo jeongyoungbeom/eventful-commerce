@@ -12,40 +12,33 @@ private val logger = KotlinLogging.logger {}
 
 @Service
 class NotificationService(
-    private val notificationRepository: NotificationRepository,
-    private val telegramService: TelegramService
+    private val notificationRepository: NotificationRepository
 ) {
 
     /**
-     * 알림 생성 및 전송
+     * 알림과 비동기 전송 작업을 같은 DB 행으로 저장한다.
      */
     @Transactional
-    fun createAndSend(
+    fun create(
         userId: UUID,
         type: NotificationType,
         title: String,
         message: String,
         orderId: UUID? = null
     ): Notification {
-        // 1. 텔레그램 전송 먼저 시도
-        val telegramMessageId = telegramService.sendNotification(userId, message)
-        
-        // 2. 결과와 함께 한 번에 DB 저장
         val notification = Notification(
             userId = userId,
             type = type,
             title = title,
             message = message,
-            orderId = orderId,
-            sentToTelegram = telegramMessageId != null,
-            telegramMessageId = telegramMessageId
+            orderId = orderId
         )
         
         val savedNotification = notificationRepository.save(notification)
         
         logger.info { 
             "📝 알림 저장 완료: userId=$userId, type=$type, orderId=$orderId, " +
-            "telegram=${if (telegramMessageId != null) "sent" else "failed"}" 
+            "delivery=pending"
         }
         
         return savedNotification

@@ -7,6 +7,7 @@ import com.eventfulcommerce.product.domain.ProductStatus
 import jakarta.persistence.*
 import jakarta.persistence.OrderColumn
 import java.util.UUID
+import java.time.Instant
 
 @Entity
 @Table(name = "products")
@@ -39,6 +40,12 @@ class Product(
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID
 
+    @Column(name = "inventory_snapshot_at")
+    var inventorySnapshotAt: Instant? = null
+
+    @Column(name = "last_inventory_adjustment_at")
+    var lastInventoryAdjustmentAt: Instant? = null
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "product_labels", joinColumns = [JoinColumn(name = "product_id")])
     @Enumerated(EnumType.STRING)
@@ -63,6 +70,12 @@ class Product(
     fun adjustStock(delta: Int) {
         require(stock + delta >= 0) { "재고는 0 미만이 될 수 없습니다" }
         this.stock += delta
+    }
+
+    fun replaceStock(stock: Int, snapshotAt: Instant) {
+        require(stock >= 0) { "재고는 0 미만이 될 수 없습니다" }
+        this.stock = stock
+        this.inventorySnapshotAt = snapshotAt
     }
 
     fun deactivate() {

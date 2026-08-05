@@ -15,11 +15,17 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update  # 테이블 자동 생성/업데이트 (개발용)
+      ddl-auto: validate  # safe default; dev and docker profiles override this
     properties:
       hibernate:
         format_sql: true
     open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
 
   kafka:
     bootstrap-servers: localhost:9092
@@ -45,19 +51,36 @@ spring:
           - redis-cluster.local:7006
         max-redirects: 3 # MOVED 응답 시 최대 재시도 횟수
 
-#  flyway:
-#    enabled: true
-#    locations: classpath:db/migration
-
 outbox:
   topic: order-events
   polling-ms: 200
+
+dlt:
+  topics: payment-events.DLT,product-events.DLT,shipping-events.DLT
+  operations:
+    enabled: ${DLT_OPERATIONS_ENABLED:false}
+    token: ${DLT_OPERATIONS_TOKEN:}
 
 jwt:
   secret: ${JWT_SECRET:}
 
 order:
   commission-rate: 0.1
+  idempotency:
+    retention-seconds: 86400
+    cleanup-fixed-delay-ms: 3600000
+  inventory:
+    orphan-cleanup-fixed-delay-ms: 10000
+    orphan-cleanup-batch-size: 100
+    orphan-cleanup-failure-backoff-seconds: 60
+    terminal-retention-seconds: 604800
+    stock-event-retention-seconds: 2592000
+    reconciliation-fixed-delay-ms: ${INVENTORY_RECONCILIATION_FIXED_DELAY_MS:300000}
+    reconciliation-batch-size: ${INVENTORY_RECONCILIATION_BATCH_SIZE:100}
+  saga-reconciliation:
+    fixed-delay-ms: ${SAGA_RECONCILIATION_FIXED_DELAY_MS:60000}
+    stale-after-seconds: ${SAGA_RECONCILIATION_STALE_AFTER_SECONDS:300}
+    batch-size: ${SAGA_RECONCILIATION_BATCH_SIZE:100}
 
 management:
   endpoints:

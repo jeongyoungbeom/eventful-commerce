@@ -20,7 +20,8 @@ dependencies {
 
     implementation("org.springframework.kafka:spring-kafka")
 
-//    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-core")
+    runtimeOnly("org.flywaydb:flyway-database-postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.kafka:spring-kafka-test")

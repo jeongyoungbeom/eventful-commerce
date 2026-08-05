@@ -21,8 +21,8 @@ class OrderExpireScheduler(
     @Scheduled(fixedDelayString = "10000")
     fun expireReservedOrders() {
         val now = Instant.now()
-        val expiredOrders = ordersRepository.findByStatusAndExpiresAtBefore(
-            OrdersStatus.ORDER_RESERVED, 
+        val expiredOrders = ordersRepository.findByStatusInAndExpiresAtBefore(
+            listOf(OrdersStatus.ORDER_RESERVED, OrdersStatus.ORDER_PARTIALLY_CANCELED),
             now
         )
 

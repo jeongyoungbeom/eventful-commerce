@@ -5,13 +5,18 @@ import java.time.Instant
 import java.util.*
 
 @Entity
-@Table(name = "shipping")
+@Table(
+    name = "shipping",
+    uniqueConstraints = [
+        UniqueConstraint(name = "uk_shipping_seller_order", columnNames = ["seller_order_id"])
+    ]
+)
 class Shipping(
     @Column(name = "order_id", nullable = false)
     val orderId: UUID,
 
-    @Column(name = "seller_order_id")
-    val sellerOrderId: UUID? = null,
+    @Column(name = "seller_order_id", nullable = false)
+    val sellerOrderId: UUID,
 
     @Column(name = "user_id", nullable = false)
     val userId: UUID,

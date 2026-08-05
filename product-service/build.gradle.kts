@@ -8,6 +8,7 @@ plugins {
 
 dependencies {
     implementation(project(":common-outbox"))
+    implementation(project(":common-idempotency"))
     implementation(project(":common-auth"))
 
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -15,6 +16,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.flywaydb:flyway-core")
+    runtimeOnly("org.flywaydb:flyway-database-postgresql")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.kafka:spring-kafka")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")

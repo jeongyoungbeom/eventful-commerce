@@ -1,5 +1,6 @@
 package com.eventfulcommerce.notification.message
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.PaymentCompletedPayload
 import com.eventfulcommerce.notification.domain.NotificationType
@@ -15,7 +16,8 @@ private val logger = KotlinLogging.logger {}
 @Component
 class PaymentEventsConsumer(
     private val objectMapper: ObjectMapper,
-    private val notificationService: NotificationService
+    private val notificationService: NotificationService,
+    private val idempotencyHandler: IdempotencyHandler
 ) {
 
     @KafkaListener(topics = ["payment-events"], groupId = "notification-service-group")
@@ -24,10 +26,17 @@ class PaymentEventsConsumer(
         
         try {
             val eventMessage = objectMapper.readValue(value, OutboxEventMessage::class.java)
-            
-            when (eventMessage.eventType) {
-                "PAYMENT_COMPLETED" -> handlePaymentCompleted(eventMessage)
-                else -> logger.warn { "⚠️ 알 수 없는 이벤트 타입: ${eventMessage.eventType}" }
+
+            if (eventMessage.eventType != "PAYMENT_COMPLETED") {
+                logger.warn { "Unsupported payment notification event: ${eventMessage.eventType}" }
+                return
+            }
+
+            idempotencyHandler.executeIdempotent(eventMessage.eventId) {
+                when (eventMessage.eventType) {
+                    "PAYMENT_COMPLETED" -> handlePaymentCompleted(eventMessage)
+                    else -> logger.warn { "⚠️ 알 수 없는 이벤트 타입: ${eventMessage.eventType}" }
+                }
             }
         } catch (e: Exception) {
             logger.error(e) { "❌ Payment 이벤트 처리 실패: $value" }
@@ -40,7 +49,7 @@ class PaymentEventsConsumer(
 
         // 구매자 알림
         val (buyerTitle, buyerMessage) = NotificationTemplate.paymentCompleted(payload.orderId, payload.amount)
-        notificationService.createAndSend(
+        notificationService.create(
             userId = payload.userId,
             type = NotificationType.PAYMENT_COMPLETED,
             title = buyerTitle,
@@ -50,7 +59,7 @@ class PaymentEventsConsumer(
 
         payload.sellerOrders.forEach { sellerOrder ->
             val (sellerTitle, sellerMessage) = NotificationTemplate.sellerPaymentReceived(payload.orderId, sellerOrder.paymentAmount)
-            notificationService.createAndSend(
+            notificationService.create(
                 userId = sellerOrder.sellerId,
                 type = NotificationType.PAYMENT_COMPLETED,
                 title = sellerTitle,

@@ -29,6 +29,7 @@ class PaymentWebhookServiceTest {
     private lateinit var paymentRepository: PaymentRepository
     private lateinit var outboxEventRepository: com.eventfulcommerce.common.repository.OutboxEventRepository
     private lateinit var businessMetrics: EventfulBusinessMetrics
+    private lateinit var paymentService: PaymentService
     private lateinit var objectMapper: ObjectMapper
     private lateinit var paymentWebhookService: PaymentWebhookService
 
@@ -37,11 +38,13 @@ class PaymentWebhookServiceTest {
         paymentRepository = mock()
         outboxEventRepository = mock()
         businessMetrics = mock()
+        paymentService = mock()
         objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
         paymentWebhookService = PaymentWebhookService(
             paymentRepository = paymentRepository,
             outboxEventRepository = outboxEventRepository,
             objectMapper = objectMapper,
+            paymentService = paymentService,
             businessMetrics = businessMetrics
         )
     }

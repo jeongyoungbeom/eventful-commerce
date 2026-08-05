@@ -1,23 +1,29 @@
 package com.eventfulcommerce.common
 
 import com.eventfulcommerce.common.repository.OutboxEventRepository
-import io.mockk.Runs
 import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.util.UUID
+import kotlin.test.assertTrue
 
 class OutboxEventServiceTest {
     private lateinit var outboxEventRepository: OutboxEventRepository
     private lateinit var outboxEventService: OutboxEventService
+    private lateinit var properties: OutboxPublisherProperties
 
     @BeforeEach
     fun setUp() {
         outboxEventRepository = mockk()
-        outboxEventService = OutboxEventService(outboxEventRepository)
+        properties = OutboxPublisherProperties().apply { maxRetries = 3 }
+        outboxEventService = OutboxEventService(
+            outboxEventRepository,
+            OutboxRetryPolicy(properties),
+            properties
+        )
     }
 
     @Test
@@ -32,69 +38,144 @@ class OutboxEventServiceTest {
     }
 
     @Test
-    fun `markAsSent는 이벤트를 SENT 상태로 전이하도록 repository에 위임한다`() {
+    fun `claim은 PENDING 이벤트 하나를 처리 임대로 원자적으로 전이한다`() {
         val eventId = UUID.randomUUID()
+        val claimToken = UUID.randomUUID()
+        val now = Instant.parse("2026-08-05T00:00:00Z")
+        every { outboxEventRepository.claim(eventId, claimToken, now, any(), any()) } returns 1
 
-        every { outboxEventRepository.updateSent(eventId, any(), any()) } returns 1
-
-        outboxEventService.markAsSent(eventId)
+        assertTrue(outboxEventService.claim(eventId, claimToken, now))
 
         verify(exactly = 1) {
-            outboxEventRepository.updateSent(
+            outboxEventRepository.claim(
                 id = eventId,
-                status = OutboxStatus.SENT,
-                sentAt = any()
+                claimToken = claimToken,
+                now = now,
+                pending = OutboxStatus.PENDING,
+                processing = OutboxStatus.PROCESSING
             )
         }
     }
 
     @Test
-    fun `markAsFailed는 에러 메시지를 2000자로 잘라 실패 처리를 위임한다`() {
+    fun `markAsSent는 같은 claim token을 가진 처리 건만 SENT로 전이한다`() {
         val eventId = UUID.randomUUID()
+        val claimToken = UUID.randomUUID()
+        every { outboxEventRepository.markSent(eventId, claimToken, any(), any(), any()) } returns 1
+
+        assertTrue(outboxEventService.markAsSent(eventId, claimToken))
+
+        verify(exactly = 1) {
+            outboxEventRepository.markSent(
+                id = eventId,
+                claimToken = claimToken,
+                sentAt = any(),
+                processing = OutboxStatus.PROCESSING,
+                sent = OutboxStatus.SENT
+            )
+        }
+    }
+
+    @Test
+    fun `markAsFailed는 에러를 잘라 지수 백오프 재시도로 전이한다`() {
+        val now = Instant.parse("2026-08-05T00:00:00Z")
+        val event = outboxEvent(retryCount = 1)
+        val claimToken = UUID.randomUUID()
         val longMessage = "x".repeat(2_100)
-
         every {
-            outboxEventRepository.updateFailed(eventId, any<String>(), 3, any())
-        } just Runs
+            outboxEventRepository.markForRetry(
+                event.id,
+                claimToken,
+                any(),
+                any(),
+                now,
+                3,
+                any(),
+                any(),
+                any()
+            )
+        } returns 1
 
-        outboxEventService.markAsFailed(eventId, RuntimeException(longMessage), maxRetries = 3)
+        assertTrue(outboxEventService.markAsFailed(event, claimToken, RuntimeException(longMessage), now))
 
         verify(exactly = 1) {
-            outboxEventRepository.updateFailed(
-                id = eventId,
-                lastError = match<String> { it.length == 2_000 && it.all { ch -> ch == 'x' } },
+            outboxEventRepository.markForRetry(
+                id = event.id,
+                claimToken = claimToken,
+                lastError = match<String> { it.length == 2_000 && it.all { character -> character == 'x' } },
+                nextAttemptAt = now.plusMillis(2_000),
+                failedAt = now,
                 maxRetries = 3,
+                processing = OutboxStatus.PROCESSING,
+                pending = OutboxStatus.PENDING,
                 failed = OutboxStatus.FAILED
             )
         }
     }
 
     @Test
-    fun `markAsFailed는 예외 메시지가 없으면 예외 클래스명을 에러 메시지로 사용한다`() {
-        val eventId = UUID.randomUUID()
-        val exception = NullPointerException()
-
+    fun `recoverExpiredClaims는 만료된 처리 임대만 실패 재시도로 돌린다`() {
+        val now = Instant.parse("2026-08-05T00:01:00Z")
+        val expiredEvent = outboxEvent(retryCount = 0).apply {
+            status = OutboxStatus.PROCESSING
+            processingToken = UUID.randomUUID()
+            processingStartedAt = now.minusSeconds(31)
+        }
+        every { outboxEventRepository.findExpiredProcessing(any(), any(), any()) } returns listOf(expiredEvent)
         every {
-            outboxEventRepository.updateFailed(eventId, any<String>(), 5, any())
-        } just Runs
+            outboxEventRepository.markForRetry(
+                expiredEvent.id,
+                expiredEvent.processingToken!!,
+                any(),
+                now.plusMillis(1_000),
+                now,
+                3,
+                any(),
+                any(),
+                any()
+            )
+        } returns 1
 
-        outboxEventService.markAsFailed(eventId, exception, maxRetries = 5)
+        assertTrue(outboxEventService.recoverExpiredClaims(now) == 1)
 
         verify(exactly = 1) {
-            outboxEventRepository.updateFailed(
-                id = eventId,
-                lastError = NullPointerException::class.java.name,
-                maxRetries = 5,
+            outboxEventRepository.markForRetry(
+                id = expiredEvent.id,
+                claimToken = expiredEvent.processingToken!!,
+                lastError = match { it.contains("lease expired") },
+                nextAttemptAt = now.plusMillis(1_000),
+                failedAt = now,
+                maxRetries = 3,
+                processing = OutboxStatus.PROCESSING,
+                pending = OutboxStatus.PENDING,
                 failed = OutboxStatus.FAILED
             )
         }
     }
 
-    private fun outboxEvent(eventType: String) = OutboxEvent(
-        aggregateType = "ORDER",
-        aggregateId = UUID.randomUUID(),
-        eventType = eventType,
-        payload = "{}",
-        status = OutboxStatus.PENDING
-    )
+    @Test
+    fun `requeueFailed는 FAILED 이벤트만 수동 재처리 대기열로 돌린다`() {
+        val eventId = UUID.randomUUID()
+        every { outboxEventRepository.requeueFailed(eventId, any(), any(), any()) } returns 1
+
+        assertTrue(outboxEventService.requeueFailed(eventId))
+
+        verify(exactly = 1) {
+            outboxEventRepository.requeueFailed(
+                id = eventId,
+                now = any(),
+                failed = OutboxStatus.FAILED,
+                pending = OutboxStatus.PENDING
+            )
+        }
+    }
+
+    private fun outboxEvent(eventType: String = "ORDER_RESERVED", retryCount: Int = 0): OutboxEvent =
+        OutboxEvent(
+            aggregateType = "ORDER",
+            aggregateId = UUID.randomUUID(),
+            eventType = eventType,
+            payload = "{}",
+            retryCount = retryCount
+        ).apply { id = UUID.randomUUID() }
 }

@@ -17,6 +17,9 @@ spring:
       ddl-auto: update
     open-in-view: false
 
+  flyway:
+    enabled: false
+
   kafka:
     bootstrap-servers: kafka:9092
     producer:

@@ -4,6 +4,7 @@ import com.eventfulcommerce.common.*
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.domain.entity.SellerOrder
 import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
+import com.eventfulcommerce.order.domain.entity.OrderItemStatus
 import com.eventfulcommerce.order.repository.OrdersRepository
 import com.eventfulcommerce.order.repository.SellerOrderRepository
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -71,18 +72,36 @@ class OrderCancelExecutor(
 
     private fun cancelTargets(orderId: UUID, targets: List<SellerOrder>, reason: String) {
         targets.forEach { sellerOrder ->
-            when (sellerOrder.status) {
-                SellerOrderStatus.RESERVED -> {
-                    sellerOrder.items.forEach { item ->
-                        inventoryReservationService.release(item.productId.toString(), item.reservationId, item.quantity)
+            sellerOrder.items.forEach { item ->
+                when (item.status) {
+                    OrderItemStatus.RESERVED -> {
+                        val result = inventoryReservationService.release(
+                            item.productId.toString(),
+                            item.reservationId,
+                            item.quantity
+                        )
+                        check(result.successful) {
+                            "Inventory release failed; order cancellation must be retried: " +
+                                "orderId=$orderId, productId=${item.productId}, " +
+                                "reservationId=${item.reservationId}, result=$result"
+                        }
+                        if (result == InventoryReservationActionResult.APPLIED) recordInventoryStockAdjusted(orderId, item, "RELEASED")
                     }
-                }
-                SellerOrderStatus.CONFIRMED -> {
-                    sellerOrder.items.forEach { item ->
-                        inventoryReservationService.adjustStock(item.productId.toString(), item.quantity)
+                    OrderItemStatus.CONFIRMED -> {
+                        val result = inventoryReservationService.restock(
+                            item.productId.toString(),
+                            item.reservationId,
+                            item.quantity
+                        )
+                        check(result.successful) {
+                            "Inventory restock failed; confirmed order cancellation must be retried: " +
+                                "orderId=$orderId, productId=${item.productId}, " +
+                                "reservationId=${item.reservationId}, result=$result"
+                        }
+                        if (result == InventoryReservationActionResult.APPLIED) recordInventoryStockAdjusted(orderId, item, "RESTOCKED")
                     }
+                    OrderItemStatus.CANCELED -> Unit
                 }
-                SellerOrderStatus.CANCELED -> Unit
             }
             sellerOrder.cancel()
         }
@@ -118,6 +137,32 @@ class OrderCancelExecutor(
                     aggregateId = orderId,
                     eventType = "ORDER_CANCELED",
                     payload = objectMapper.writeValueAsString(payload),
+                    status = OutboxStatus.PENDING
+                )
+            )
+        )
+    }
+
+    private fun recordInventoryStockAdjusted(
+        orderId: UUID,
+        item: com.eventfulcommerce.order.domain.entity.OrderItem,
+        reason: String
+    ) {
+        outboxEventService.record(
+            listOf(
+                OutboxEvent(
+                    aggregateType = "INVENTORY",
+                    aggregateId = item.productId,
+                    eventType = "INVENTORY_STOCK_ADJUSTED",
+                    payload = objectMapper.writeValueAsString(
+                        InventoryStockAdjustedPayload(
+                            orderId = orderId,
+                            productId = item.productId,
+                            reservationId = item.reservationId,
+                            stockDelta = item.quantity,
+                            reason = reason
+                        )
+                    ),
                     status = OutboxStatus.PENDING
                 )
             )

@@ -1,5 +1,10 @@
 package com.eventfulcommerce.order.exception
 
+import com.eventfulcommerce.order.dto.ErrorResponse
+import com.eventfulcommerce.order.dto.FieldValidationError
+import com.eventfulcommerce.order.dto.OrderIdErrorDetails
+import com.eventfulcommerce.order.dto.OrderStatusErrorDetails
+import com.eventfulcommerce.order.dto.ValidationErrorDetails
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.validation.ConstraintViolationException
 import org.springframework.http.HttpStatus
@@ -21,28 +26,30 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
     fun handleValidation(ex: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
-        val errors = ex.bindingResult.fieldErrors.associate { it.field to (it.defaultMessage ?: "Invalid") }
-        return ResponseEntity
-            .status(HttpStatus.BAD_REQUEST)
-            .body(ErrorResponse(
-                code = "VALIDATION_FAILED",
-                message = "요청 값이 올바르지 않습니다",
-                details = errors,
-                timestamp = Instant.now()
-            ))
-    }
-
-    @ExceptionHandler(ConstraintViolationException::class)
-    fun handleConstraintViolation(ex: ConstraintViolationException): ResponseEntity<ErrorResponse> {
-        val errors = ex.constraintViolations.associate {
-            it.propertyPath.toString() to (it.message ?: "Invalid")
+        val errors = ex.bindingResult.fieldErrors.map {
+            FieldValidationError(field = it.field, message = it.defaultMessage ?: "Invalid")
         }
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
             .body(ErrorResponse(
                 code = "VALIDATION_FAILED",
                 message = "요청 값이 올바르지 않습니다",
-                details = errors,
+                details = ValidationErrorDetails(errors),
+                timestamp = Instant.now()
+            ))
+    }
+
+    @ExceptionHandler(ConstraintViolationException::class)
+    fun handleConstraintViolation(ex: ConstraintViolationException): ResponseEntity<ErrorResponse> {
+        val errors = ex.constraintViolations.map {
+            FieldValidationError(field = it.propertyPath.toString(), message = it.message ?: "Invalid")
+        }
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(ErrorResponse(
+                code = "VALIDATION_FAILED",
+                message = "요청 값이 올바르지 않습니다",
+                details = ValidationErrorDetails(errors),
                 timestamp = Instant.now()
             ))
     }
@@ -76,10 +83,10 @@ class GlobalExceptionHandler {
             .body(ErrorResponse(
                 code = "INVALID_ORDER_STATUS",
                 message = ex.message ?: "잘못된 주문 상태입니다.",
-                details = mapOf<String, String>(
-                    "orderId" to ex.orderId.toString(),
-                    "currentStatus" to ex.currentStatus.toString(),
-                    "expectedStatus" to ex.expectedStatus.toString()
+                details = OrderStatusErrorDetails(
+                    orderId = ex.orderId,
+                    currentStatus = ex.currentStatus,
+                    expectedStatus = ex.expectedStatus
                 ),
                 timestamp = Instant.now()
             ))
@@ -97,7 +104,7 @@ class GlobalExceptionHandler {
             .body(ErrorResponse(
                 code = "ORDER_NOT_FOUND",
                 message = ex.message ?: "주문을 찾을 수 없습니다.",
-                details = mapOf<String, String>("orderId" to ex.orderId.toString()),
+                details = OrderIdErrorDetails(ex.orderId),
                 timestamp = Instant.now()
             ))
     }
@@ -142,7 +149,7 @@ class GlobalExceptionHandler {
             .body(ErrorResponse(
                 code = "ORDER_FORBIDDEN",
                 message = ex.message ?: "해당 주문에 대한 권한이 없습니다.",
-                details = mapOf("orderId" to ex.orderId.toString()),
+                details = OrderIdErrorDetails(ex.orderId),
                 timestamp = Instant.now()
             ))
     }
@@ -157,6 +164,30 @@ class GlobalExceptionHandler {
                 message = ex.message ?: "해당 주문 조회 권한이 없습니다.",
                 timestamp = Instant.now()
             ))
+    }
+
+    @ExceptionHandler(OrderIdempotencyConflictException::class)
+    fun handleIdempotencyConflict(ex: OrderIdempotencyConflictException): ResponseEntity<ErrorResponse> {
+        logger.warn { "Idempotency key reused with another request: keyFingerprint=${ex.keyFingerprint}" }
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ErrorResponse(
+                code = "IDEMPOTENCY_KEY_REUSED",
+                message = ex.message ?: "Idempotency-Key was already used with a different request.",
+                timestamp = Instant.now()
+            )
+        )
+    }
+
+    @ExceptionHandler(OrderIdempotencyInProgressException::class)
+    fun handleIdempotencyInProgress(ex: OrderIdempotencyInProgressException): ResponseEntity<ErrorResponse> {
+        logger.warn { "Idempotency key has no completed response yet: keyFingerprint=${ex.keyFingerprint}" }
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ErrorResponse(
+                code = "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+                message = ex.message ?: "Order request is still being completed. Retry with the same Idempotency-Key.",
+                timestamp = Instant.now()
+            )
+        )
     }
 
     @ExceptionHandler(NoResourceFoundException::class)
@@ -181,28 +212,3 @@ class GlobalExceptionHandler {
             ))
     }
 }
-
-/**
- * 에러 응답 DTO
- */
-data class ErrorResponse(
-    /**
-     * 에러 코드 (예: INSUFFICIENT_INVENTORY)
-     */
-    val code: String,
-    
-    /**
-     * 사용자에게 보여줄 메시지
-     */
-    val message: String,
-    
-    /**
-     * 추가 상세 정보 (선택)
-     */
-    val details: Any? = null,
-    
-    /**
-     * 에러 발생 시각
-     */
-    val timestamp: Instant
-)

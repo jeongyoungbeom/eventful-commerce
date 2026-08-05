@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.springframework.dao.DataIntegrityViolationException
 import java.util.UUID
 
 class IdempotencyHandlerTest {
@@ -24,11 +23,10 @@ class IdempotencyHandlerTest {
     }
 
     @Test
-    fun `처음 처리하는 이벤트는 저장 후 action을 실행하고 Success를 반환한다`() {
+    fun `최초 이벤트는 marker를 선점하고 action을 실행한다`() {
         val eventId = UUID.randomUUID()
         var actionCalls = 0
-
-        every { processedEventRepository.save(any<ProcessedEvent>()) } answers { firstArg() }
+        every { processedEventRepository.insertIfAbsent(eventId) } returns 1
 
         val result = idempotencyHandler.executeIdempotent(eventId) {
             actionCalls += 1
@@ -38,21 +36,14 @@ class IdempotencyHandlerTest {
         assertTrue(result is IdempotencyResult.Success)
         assertEquals("processed", (result as IdempotencyResult.Success).value)
         assertEquals(1, actionCalls)
-        verify(exactly = 1) {
-            processedEventRepository.save(
-                match<ProcessedEvent> { it.eventId == eventId }
-            )
-        }
+        verify(exactly = 1) { processedEventRepository.insertIfAbsent(eventId) }
     }
 
     @Test
-    fun `이미 처리된 이벤트는 action을 실행하지 않고 AlreadyProcessed를 반환한다`() {
+    fun `중복 이벤트는 action을 실행하지 않는다`() {
         val eventId = UUID.randomUUID()
         var actionCalls = 0
-
-        every {
-            processedEventRepository.save(any<ProcessedEvent>())
-        } throws DataIntegrityViolationException("duplicate event")
+        every { processedEventRepository.insertIfAbsent(eventId) } returns 0
 
         val result = idempotencyHandler.executeIdempotent(eventId) {
             actionCalls += 1
@@ -61,19 +52,14 @@ class IdempotencyHandlerTest {
 
         assertSame(IdempotencyResult.AlreadyProcessed, result)
         assertEquals(0, actionCalls)
-        verify(exactly = 1) {
-            processedEventRepository.save(
-                match<ProcessedEvent> { it.eventId == eventId }
-            )
-        }
+        verify(exactly = 1) { processedEventRepository.insertIfAbsent(eventId) }
     }
 
     @Test
-    fun `action에서 발생한 예외는 삼키지 않고 호출자에게 전파한다`() {
+    fun `action 예외는 호출자에게 전파한다`() {
         val eventId = UUID.randomUUID()
         val failure = IllegalStateException("consumer failure")
-
-        every { processedEventRepository.save(any<ProcessedEvent>()) } answers { firstArg() }
+        every { processedEventRepository.insertIfAbsent(eventId) } returns 1
 
         val thrown = assertThrows(IllegalStateException::class.java) {
             idempotencyHandler.executeIdempotent(eventId) {
@@ -82,10 +68,21 @@ class IdempotencyHandlerTest {
         }
 
         assertSame(failure, thrown)
-        verify(exactly = 1) {
-            processedEventRepository.save(
-                match<ProcessedEvent> { it.eventId == eventId }
-            )
+        verify(exactly = 1) { processedEventRepository.insertIfAbsent(eventId) }
+    }
+
+    @Test
+    fun `예상하지 못한 insert row count는 action 실행 전에 실패한다`() {
+        val eventId = UUID.randomUUID()
+        var actionCalls = 0
+        every { processedEventRepository.insertIfAbsent(eventId) } returns 2
+
+        assertThrows(IllegalStateException::class.java) {
+            idempotencyHandler.executeIdempotent(eventId) {
+                actionCalls += 1
+            }
         }
+
+        assertEquals(0, actionCalls)
     }
 }

@@ -1,6 +1,14 @@
 package com.eventfulcommerce.payment.service
 
-import com.eventfulcommerce.common.*
+import com.eventfulcommerce.common.IdempotencyHandler
+import com.eventfulcommerce.common.OrderCanceledPayload
+import com.eventfulcommerce.common.OrderReservedPayload
+import com.eventfulcommerce.common.OutboxEvent
+import com.eventfulcommerce.common.OutboxEventMessage
+import com.eventfulcommerce.common.OutboxStatus
+import com.eventfulcommerce.common.PaymentCompletedSellerPayload
+import com.eventfulcommerce.common.PaymentRefundedPayload
+import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
 import com.eventfulcommerce.common.repository.OutboxEventRepository
 import com.eventfulcommerce.payment.domain.PaymentStatus
 import com.eventfulcommerce.payment.domain.entity.Payment
@@ -8,12 +16,9 @@ import com.eventfulcommerce.payment.domain.entity.PaymentRefund
 import com.eventfulcommerce.payment.repository.PaymentRefundRepository
 import com.eventfulcommerce.payment.repository.PaymentRepository
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.eventfulcommerce.common.metrics.EventfulBusinessMetrics
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-
-private val logger = KotlinLogging.logger { }
+import java.util.UUID
 
 @Service
 class PaymentService(
@@ -27,36 +32,29 @@ class PaymentService(
     @Transactional
     fun handleOrderCreated(message: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(message.eventId) {
-            logger.info { "주문 생성 이벤트 수신: eventId=${message.eventId}" }
             val payload = objectMapper.readValue(message.payload, OrderReservedPayload::class.java)
+            if (paymentRepository.findByOrderId(payload.orderId) != null) return@executeIdempotent
 
-            val existing = paymentRepository.findByOrderId(payload.orderId)
-            if (existing != null) {
-                logger.info { "이미 결제 존재: ${existing.id}" }
-                return@executeIdempotent
-            }
-
-            val payment = Payment(
-                orderId = payload.orderId,
-                userId = payload.userId,
-                status = PaymentStatus.PAYMENT_RESERVED,
-                amount = payload.totalPaymentAmount,
-                sellerOrdersJson = objectMapper.writeValueAsString(
-                    payload.sellerOrders.map {
-                        PaymentCompletedSellerPayload(
-                            sellerOrderId = it.sellerOrderId,
-                            sellerId = it.sellerId,
-                            paymentAmount = it.paymentAmount,
-                            commissionRate = it.commissionRate,
-                            commissionAmount = it.commissionAmount,
-                            settlementAmount = it.settlementAmount
-                        )
-                    }
+            paymentRepository.save(
+                Payment(
+                    orderId = payload.orderId,
+                    userId = payload.userId,
+                    status = PaymentStatus.PAYMENT_RESERVED,
+                    amount = payload.totalPaymentAmount,
+                    sellerOrdersJson = objectMapper.writeValueAsString(
+                        payload.sellerOrders.map {
+                            PaymentCompletedSellerPayload(
+                                sellerOrderId = it.sellerOrderId,
+                                sellerId = it.sellerId,
+                                paymentAmount = it.paymentAmount,
+                                commissionRate = it.commissionRate,
+                                commissionAmount = it.commissionAmount,
+                                settlementAmount = it.settlementAmount
+                            )
+                        }
+                    )
                 )
             )
-
-            logger.info { "결제 생성: orderId=${payload.orderId}, amount=${payload.totalPaymentAmount}" }
-            paymentRepository.save(payment)
             businessMetrics.increment("payment.reserve", "created")
         }
     }
@@ -65,37 +63,117 @@ class PaymentService(
     fun handleOrderCanceled(message: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(message.eventId) {
             val payload = objectMapper.readValue(message.payload, OrderCanceledPayload::class.java)
-            val payment = paymentRepository.findByOrderId(payload.orderId) ?: run {
-                logger.warn { "취소 주문의 결제 정보 없음: orderId=${payload.orderId}" }
-                return@executeIdempotent
+            val payment = paymentRepository.findByOrderId(payload.orderId)
+                ?: throw IllegalStateException("Payment prerequisite not found for canceled order: orderId=${payload.orderId}")
+
+            when (payment.status) {
+                PaymentStatus.PAYMENT_RESERVED -> {
+                    payment.cancellationRequested = true
+                    payment.pendingCancellationPayload = objectMapper.writeValueAsString(payload)
+                    paymentRepository.save(payment)
+                    businessMetrics.increment("payment.refund", "pending_payment_completion")
+                }
+                PaymentStatus.PAYMENT_COMPLETED,
+                PaymentStatus.PAYMENT_PARTIALLY_REFUNDED -> refundCanceledOrder(payment, payload)
+                else -> businessMetrics.increment("payment.refund", "not_required")
             }
+        }
+    }
 
-            if (payment.status != PaymentStatus.PAYMENT_COMPLETED &&
-                payment.status != PaymentStatus.PAYMENT_PARTIALLY_REFUNDED
-            ) {
-                logger.info { "환불 불필요 결제 상태: orderId=${payload.orderId}, status=${payment.status}" }
-                return@executeIdempotent
-            }
-
-            val refundEvents = payload.canceledSellerOrders.mapNotNull { canceled ->
-                val existing = paymentRefundRepository.findByPaymentIdAndSellerOrderId(payment.id, canceled.sellerOrderId)
-                if (existing != null) return@mapNotNull null
-
-                val refund = paymentRefundRepository.save(
-                    PaymentRefund(
-                        payment = payment,
-                        orderId = payload.orderId,
-                        sellerOrderId = canceled.sellerOrderId,
-                        sellerId = canceled.sellerId,
-                        amount = canceled.refundAmount,
-                        reason = payload.reason
-                    )
+    @Transactional
+    fun handleOrderCancellationReconciliation(message: OutboxEventMessage) {
+        idempotencyHandler.executeIdempotent(message.eventId) {
+            val payload = objectMapper.readValue(message.payload, OrderCanceledPayload::class.java)
+            val payment = paymentRepository.findByOrderId(payload.orderId)
+                ?: throw IllegalStateException(
+                    "Payment prerequisite not found for cancellation reconciliation: orderId=${payload.orderId}"
                 )
 
-                payment.refundedAmount += refund.amount
+            when (payment.status) {
+                PaymentStatus.PAYMENT_RESERVED -> deferCancellation(payment, payload)
+                PaymentStatus.PAYMENT_COMPLETED,
+                PaymentStatus.PAYMENT_PARTIALLY_REFUNDED -> {
+                    val newlyCreatedRefunds = refundCanceledOrder(payment, payload)
+                    rePublishExistingRefunds(payment, payload, newlyCreatedRefunds.map { it.sellerOrderId }.toSet())
+                }
+                PaymentStatus.PAYMENT_REFUNDED -> rePublishExistingRefunds(payment, payload, emptySet())
+                else -> businessMetrics.increment("payment.refund", "reconciliation_not_required")
+            }
+        }
+    }
+
+    fun refundPendingCancellation(payment: Payment) {
+        val pendingPayload = payment.pendingCancellationPayload ?: return
+        if (!payment.cancellationRequested) return
+        check(payment.status == PaymentStatus.PAYMENT_COMPLETED || payment.status == PaymentStatus.PAYMENT_PARTIALLY_REFUNDED) {
+            "Pending cancellation cannot be refunded before payment completion: paymentId=${payment.id}"
+        }
+        refundCanceledOrder(payment, objectMapper.readValue(pendingPayload, OrderCanceledPayload::class.java))
+        payment.pendingCancellationPayload = null
+        payment.cancellationRequested = false
+    }
+
+    private fun deferCancellation(payment: Payment, payload: OrderCanceledPayload) {
+        payment.cancellationRequested = true
+        payment.pendingCancellationPayload = objectMapper.writeValueAsString(payload)
+        paymentRepository.save(payment)
+        businessMetrics.increment("payment.refund", "pending_payment_completion")
+    }
+
+    private fun refundCanceledOrder(payment: Payment, payload: OrderCanceledPayload): List<PaymentRefund> {
+        val createdRefunds = payload.canceledSellerOrders.mapNotNull { canceled ->
+            if (paymentRefundRepository.findByPaymentIdAndSellerOrderId(payment.id, canceled.sellerOrderId) != null) {
+                return@mapNotNull null
+            }
+            val refund = paymentRefundRepository.save(
+                PaymentRefund(
+                    payment = payment,
+                    orderId = payload.orderId,
+                    sellerOrderId = canceled.sellerOrderId,
+                    sellerId = canceled.sellerId,
+                    amount = canceled.refundAmount,
+                    reason = payload.reason
+                )
+            )
+            payment.refundedAmount += refund.amount
+            refund
+        }
+
+        payment.status = if (payment.refundedAmount >= payment.amount) {
+            PaymentStatus.PAYMENT_REFUNDED
+        } else {
+            PaymentStatus.PAYMENT_PARTIALLY_REFUNDED
+        }
+        paymentRepository.save(payment)
+        publishRefundEvents(payment, createdRefunds)
+        businessMetrics.increment("payment.refund", if (createdRefunds.isEmpty()) "skipped" else "created")
+        return createdRefunds
+    }
+
+    private fun rePublishExistingRefunds(
+        payment: Payment,
+        payload: OrderCanceledPayload,
+        newlyCreatedSellerOrderIds: Set<UUID>
+    ) {
+        val sellerOrderIds = payload.canceledSellerOrders
+            .map { it.sellerOrderId }
+            .filterNot { it in newlyCreatedSellerOrderIds }
+        if (sellerOrderIds.isEmpty()) return
+
+        val existingRefunds = paymentRefundRepository.findByPaymentIdAndSellerOrderIdIn(payment.id, sellerOrderIds)
+        publishRefundEvents(payment, existingRefunds)
+        if (existingRefunds.isNotEmpty()) {
+            businessMetrics.increment("payment.refund", "reconciliation_republished")
+        }
+    }
+
+    private fun publishRefundEvents(payment: Payment, refunds: List<PaymentRefund>) {
+        if (refunds.isEmpty()) return
+        outboxEventRepository.saveAll(
+            refunds.map { refund ->
                 OutboxEvent(
                     aggregateType = "PAYMENT_REFUND",
-                    aggregateId = refund.id,
+                    aggregateId = payment.id,
                     eventType = "PAYMENT_REFUNDED",
                     payload = objectMapper.writeValueAsString(
                         PaymentRefundedPayload(
@@ -112,17 +190,6 @@ class PaymentService(
                     status = OutboxStatus.PENDING
                 )
             }
-
-            payment.status = if (payment.refundedAmount >= payment.amount) {
-                PaymentStatus.PAYMENT_REFUNDED
-            } else {
-                PaymentStatus.PAYMENT_PARTIALLY_REFUNDED
-            }
-            paymentRepository.save(payment)
-            if (refundEvents.isNotEmpty()) outboxEventRepository.saveAll(refundEvents)
-            businessMetrics.increment("payment.refund", if (refundEvents.isNotEmpty()) "created" else "skipped")
-
-            logger.info { "환불 처리 완료: orderId=${payload.orderId}, refunds=${refundEvents.size}" }
-        }
+        )
     }
 }

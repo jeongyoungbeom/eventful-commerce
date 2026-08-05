@@ -12,6 +12,7 @@ import com.eventfulcommerce.product.repository.ProductRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.boot.CommandLineRunner
 import org.springframework.stereotype.Component
+import org.springframework.context.annotation.Profile
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
@@ -19,6 +20,7 @@ import java.util.UUID
 // TEST_SELLER_ID는 user-service DataInitializer.TEST_SELLER_ID와 동일한 값을 사용합니다.
 // 이미 FLOWERS 카테고리 상품이 존재하면 skip됩니다 (idempotent).
 @Component
+@Profile("dev", "local")
 class DataInitializer(
     private val productRepository: ProductRepository,
     private val outboxEventService: OutboxEventService,

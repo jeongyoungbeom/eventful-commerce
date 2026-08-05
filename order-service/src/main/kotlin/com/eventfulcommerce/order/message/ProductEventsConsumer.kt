@@ -1,5 +1,6 @@
 package com.eventfulcommerce.order.message
 
+import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
@@ -15,11 +16,17 @@ import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 
 private val logger = KotlinLogging.logger {}
+private val supportedProductEventTypes = setOf(
+    "PRODUCT_REGISTERED",
+    "PRODUCT_STOCK_UPDATED",
+    "PRODUCT_DEACTIVATED"
+)
 
 @Component
 class ProductEventsConsumer(
     private val productReadModelRepository: ProductReadModelRepository,
     private val inventoryReservationService: InventoryReservationService,
+    private val idempotencyHandler: IdempotencyHandler,
     private val objectMapper: ObjectMapper
 ) {
     @KafkaListener(topics = ["product-events"], groupId = "order-service-group")
@@ -27,11 +34,18 @@ class ProductEventsConsumer(
     fun consume(message: String) {
         val event = objectMapper.readValue(message, OutboxEventMessage::class.java)
 
-        when (event.eventType) {
-            "PRODUCT_REGISTERED" -> handleProductRegistered(event)
-            "PRODUCT_STOCK_UPDATED" -> handleProductStockUpdated(event)
-            "PRODUCT_DEACTIVATED" -> handleProductDeactivated(event)
-            else -> logger.warn { "알 수 없는 product 이벤트 타입: ${event.eventType}" }
+        if (event.eventType !in supportedProductEventTypes) {
+            logger.warn { "Unsupported product event: ${event.eventType}" }
+            return
+        }
+
+        idempotencyHandler.executeIdempotent(event.eventId) {
+            when (event.eventType) {
+                "PRODUCT_REGISTERED" -> handleProductRegistered(event)
+                "PRODUCT_STOCK_UPDATED" -> handleProductStockUpdated(event)
+                "PRODUCT_DEACTIVATED" -> handleProductDeactivated(event)
+                else -> logger.warn { "알 수 없는 product 이벤트 타입: ${event.eventType}" }
+            }
         }
     }
 
@@ -62,13 +76,25 @@ class ProductEventsConsumer(
 
         val readModel = productReadModelRepository.findByIdOrNull(payload.productId) ?: run {
             logger.warn { "읽기 모델 없음 (재고 변경 무시): ${payload.productId}" }
-            return
+            throw IllegalStateException("Product read model prerequisite not found: productId=${payload.productId}")
         }
 
         readModel.updateStock(payload.stockDelta, payload.newStock)
-        inventoryReservationService.adjustStock(payload.productId.toString(), payload.stockDelta)
+        if (!payload.redisAlreadyAdjusted) {
+            val redisResult = inventoryReservationService.adjustStockIdempotent(
+                payload.productId.toString(),
+                event.eventId,
+                payload.stockDelta
+            )
+            check(redisResult.successful) {
+                "Redis stock event was not applied: productId=${payload.productId}, eventId=${event.eventId}, result=$redisResult"
+            }
+        }
 
-        logger.info { "재고 변경 반영: ${payload.productId}, delta=${payload.stockDelta}, newStock=${payload.newStock}" }
+        logger.info {
+            "재고 변경 반영: ${payload.productId}, delta=${payload.stockDelta}, newStock=${payload.newStock}, " +
+                "redisAlreadyAdjusted=${payload.redisAlreadyAdjusted}"
+        }
     }
 
     private fun handleProductDeactivated(event: OutboxEventMessage) {
@@ -76,7 +102,7 @@ class ProductEventsConsumer(
 
         val readModel = productReadModelRepository.findByIdOrNull(payload.productId) ?: run {
             logger.warn { "읽기 모델 없음 (비활성화 무시): ${payload.productId}" }
-            return
+            throw IllegalStateException("Product read model prerequisite not found: productId=${payload.productId}")
         }
 
         readModel.deactivate()
