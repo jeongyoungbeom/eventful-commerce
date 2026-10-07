@@ -378,12 +378,6 @@ class InventoryReservationService(
         return result
     }
 
-    fun getStockSummary(productId: String) {
-        val stock = redisTemplate.opsForValue().get(stockKey(productId))?.toLong() ?: 0L
-        val holds = redisTemplate.opsForValue().get(holdCountKey(productId))?.toLong() ?: 0L
-        logger.info { "Inventory summary: productId=$productId, available=$stock, held=$holds" }
-    }
-
     fun getStockSnapshot(productId: String): InventoryStockSnapshot = InventoryStockSnapshot(
         availableStock = redisTemplate.opsForValue().get(stockKey(productId))?.toLongOrNull(),
         heldQuantity = redisTemplate.opsForValue().get(holdCountKey(productId))?.toLongOrNull() ?: 0L

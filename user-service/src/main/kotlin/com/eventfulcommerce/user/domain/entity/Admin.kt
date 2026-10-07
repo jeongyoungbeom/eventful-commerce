@@ -30,9 +30,6 @@ class Admin(
     var updatedAt: Instant = Instant.now()
 ) : Lockable {
 
-    override fun isAccountLocked(): Boolean =
-        accountLockedUntil?.let { it.isAfter(Instant.now()) } ?: false
-
     override fun lockAccount(until: Instant) {
         this.accountLockedUntil = until
         this.updatedAt = Instant.now()
@@ -40,11 +37,6 @@ class Admin(
 
     override fun unlockAccount() {
         this.accountLockedUntil = null
-        this.updatedAt = Instant.now()
-    }
-
-    fun updatePassword(newPassword: String) {
-        this.password = newPassword
         this.updatedAt = Instant.now()
     }
 }

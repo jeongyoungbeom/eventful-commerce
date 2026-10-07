@@ -42,11 +42,6 @@ class RefreshTokenService(
         logger.info { "Refresh Token 삭제: id=$id, role=$role" }
     }
 
-    fun getRemainingTTL(id: UUID, role: UserRole): Long? {
-        val ttl = redisTemplate.getExpire(buildKey(id, role), TimeUnit.SECONDS)
-        return if (ttl > 0) ttl else null
-    }
-
     private fun buildKey(id: UUID, role: UserRole): String = when (role) {
         UserRole.USER -> "$USER_REFRESH_PREFIX$id"
         UserRole.SELLER -> "$SELLER_REFRESH_PREFIX$id"

@@ -42,44 +42,4 @@ class TokenBlacklistService(
             logger.error(e) { "❌ Blacklist 추가 실패" }
         }
     }
-    
-    /**
-     * 토큰이 Blacklist에 있는지 확인
-     */
-    fun isBlacklisted(accessToken: String): Boolean {
-        val key = BLACKLIST_PREFIX + accessToken
-        val exists = redisTemplate.hasKey(key)
-        
-        if (exists) {
-            logger.debug { "🚫 Blacklist된 토큰 감지" }
-        }
-        
-        return exists
-    }
-    
-    /**
-     * Blacklist에서 토큰 제거 (테스트/관리 용도)
-     */
-    fun removeFromBlacklist(accessToken: String) {
-        val key = BLACKLIST_PREFIX + accessToken
-        redisTemplate.delete(key)
-        
-        logger.info { "🗑️ Blacklist에서 제거" }
-    }
-    
-    /**
-     * 모든 Blacklist 토큰 삭제 (관리 용도)
-     */
-    fun clearAllBlacklisted(): Long {
-        val pattern = "$BLACKLIST_PREFIX*"
-        val keys = redisTemplate.keys(pattern)
-        
-        return if (keys.isNotEmpty()) {
-            redisTemplate.delete(keys)
-            logger.info { "🗑️ 전체 Blacklist 삭제: ${keys.size}개" }
-            keys.size.toLong()
-        } else {
-            0L
-        }
-    }
 }

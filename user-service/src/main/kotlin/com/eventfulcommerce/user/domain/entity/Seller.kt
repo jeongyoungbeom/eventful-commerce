@@ -42,9 +42,6 @@ class Seller(
     var updatedAt: Instant = Instant.now()
 ) : Lockable {
 
-    override fun isAccountLocked(): Boolean =
-        accountLockedUntil?.let { it.isAfter(Instant.now()) } ?: false
-
     override fun lockAccount(until: Instant) {
         this.accountLockedUntil = until
         this.updatedAt = Instant.now()
@@ -52,22 +49,6 @@ class Seller(
 
     override fun unlockAccount() {
         this.accountLockedUntil = null
-        this.updatedAt = Instant.now()
-    }
-
-    fun updatePassword(newPassword: String) {
-        this.password = newPassword
-        this.updatedAt = Instant.now()
-    }
-
-    fun updateBankInfo(bankAccount: String, bankCode: String) {
-        this.bankAccount = bankAccount
-        this.bankCode = bankCode
-        this.updatedAt = Instant.now()
-    }
-
-    fun updateBusinessName(businessName: String) {
-        this.businessName = businessName
         this.updatedAt = Instant.now()
     }
 }

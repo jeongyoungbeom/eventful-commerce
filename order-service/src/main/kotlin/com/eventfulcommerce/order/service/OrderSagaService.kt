@@ -86,13 +86,6 @@ class OrderSagaService(
         }
     }
 
-    fun markCompensationFailed(orderId: UUID, exception: Exception) {
-        saga(orderId).apply {
-            status = OrderSagaStatus.COMPENSATION_FAILED
-            lastError = (exception.message ?: exception.javaClass.name).take(2_000)
-        }
-    }
-
     private fun saga(orderId: UUID): OrderSaga = orderSagaRepository.findByOrderId(orderId)
         ?: orderSagaRepository.save(OrderSaga(orderId = orderId))
 }

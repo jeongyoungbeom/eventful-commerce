@@ -3,6 +3,8 @@ set -euo pipefail
 
 TEST_NAME="outbox-status-transition"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/test-helpers.sh
+source "$SCRIPT_DIR/lib/test-helpers.sh"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost}"
 RESULT_ROOT="${RESULT_ROOT:-$SCRIPT_DIR/results}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$TEST_NAME}"
@@ -43,43 +45,18 @@ finish() {
   echo "[로그 파일] $LOG_FILE"
 }
 
-db_exec() {
-  local db="$1" sql="$2"
-  command -v docker >/dev/null 2>&1 || return 0
-  docker exec eventful-postgres psql -U postgres -d "$db" -v ON_ERROR_STOP=0 -q -c "$sql" >/dev/null 2>&1 || true
-}
-
-redis_del() {
-  command -v docker >/dev/null 2>&1 || return 0
-  local key
-  for key in "$@"; do
-    [[ -n "$key" ]] || continue
-    docker exec redis-node-1 redis-cli -c -p 7001 del "$key" >/dev/null 2>&1 || true
-  done
-}
-
-redis_del_pattern() {
-  command -v docker >/dev/null 2>&1 || return 0
-  local pattern="$1"
-  local key
-  while IFS= read -r key; do
-    [[ -n "$key" ]] || continue
-    redis_del "$key"
-  done < <(docker exec redis-node-1 redis-cli -c -p 7001 --scan --pattern "$pattern" 2>/dev/null || true)
-}
-
 cleanup() {
   [[ "$CLEANUP_DONE" == "1" ]] && return 0
   CLEANUP_DONE=1
   [[ "${KEEP_TEST_DATA:-0}" == "1" ]] && { echo "[정리] KEEP_TEST_DATA=1 설정으로 테스트 데이터 정리를 건너뜁니다"; return 0; }
   echo "[정리] 이번 실행에서 생성한 테스트 데이터를 삭제합니다"
   if [[ -n "${PRODUCT_ID:-}" ]]; then
-    db_exec order_service "delete from product_read_model where product_id = '$PRODUCT_ID';"
-    db_exec product_service "delete from outbox_event where aggregate_id = '$PRODUCT_ID'; delete from product_labels where product_id = '$PRODUCT_ID'; delete from product_images where product_id = '$PRODUCT_ID'; delete from products where id = '$PRODUCT_ID';"
+    psql_exec order_service "delete from product_read_model where product_id = '$PRODUCT_ID';"
+    psql_exec product_service "delete from outbox_event where aggregate_id = '$PRODUCT_ID'; delete from product_labels where product_id = '$PRODUCT_ID'; delete from product_images where product_id = '$PRODUCT_ID'; delete from products where id = '$PRODUCT_ID';"
     redis_del_pattern "{product:$PRODUCT_ID}:*"
   fi
   if [[ -n "${SELLER_ID:-}" || -n "${SELLER_EMAIL:-}" ]]; then
-    db_exec user_service "delete from audit_logs where user_id = '${SELLER_ID:-}'; delete from sellers where email = '${SELLER_EMAIL:-}' or id = '${SELLER_ID:-}';"
+    psql_exec user_service "delete from audit_logs where user_id = '${SELLER_ID:-}'; delete from sellers where email = '${SELLER_EMAIL:-}' or id = '${SELLER_ID:-}';"
     redis_del "refresh_token:seller:${SELLER_ID:-}"
   fi
   echo "[정리] 테스트 데이터 정리 완료"
@@ -97,41 +74,6 @@ on_interrupt() {
 }
 trap on_exit EXIT
 trap on_interrupt INT TERM
-
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    MESSAGE="필수 명령어가 없습니다: $1"
-    exit 1
-  }
-}
-
-psql_value() {
-  local db="$1" sql="$2"
-  docker exec eventful-postgres psql -U postgres -d "$db" -tAc "$sql"
-}
-
-http_json() {
-  local method="$1" url="$2" data="${3:-}" token="${4:-}"
-  local user_id="${5:-}" role="${6:-}"
-  local body_file status
-  body_file=$(mktemp)
-  if [[ -n "$token" ]]; then
-    status=$(curl -sS -o "$body_file" -w "%{http_code}" -X "$method" "$url" \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $token" \
-      ${user_id:+-H "X-User-Id: $user_id"} \
-      ${role:+-H "X-User-Role: $role"} \
-      ${data:+-d "$data"} || printf "000")
-  else
-    status=$(curl -sS -o "$body_file" -w "%{http_code}" -X "$method" "$url" \
-      -H "Content-Type: application/json" \
-      ${data:+-d "$data"} || printf "000")
-  fi
-  status="${status: -3}"
-  RESPONSE_STATUS="$status"
-  RESPONSE_BODY=$(cat "$body_file")
-  rm -f "$body_file"
-}
 
 http_product_create() {
   local token="$1" payload="$2" user_id="${3:-}" role="${4:-}"

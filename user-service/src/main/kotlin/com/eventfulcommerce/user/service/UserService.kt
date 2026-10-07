@@ -3,12 +3,9 @@ package com.eventfulcommerce.user.service
 import com.eventfulcommerce.user.domain.entity.User
 import com.eventfulcommerce.user.domain.repository.UserRepository
 import com.eventfulcommerce.user.exception.UserNotFoundException
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
-
-private val logger = KotlinLogging.logger {}
 
 @Service
 class UserService(
@@ -43,15 +40,5 @@ class UserService(
     @Transactional
     fun save(user: User): User {
         return userRepository.save(user)
-    }
-    
-    /**
-     * User 삭제
-     */
-    @Transactional
-    fun delete(userId: UUID) {
-        val user = findById(userId)
-        userRepository.delete(user)
-        logger.info { "🗑️ User 삭제: userId=$userId" }
     }
 }

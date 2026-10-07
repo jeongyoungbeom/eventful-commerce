@@ -50,7 +50,6 @@ class ShippingServiceTest {
             shippingRepository = shippingRepository,
             outboxEventService = outboxEventService,
             objectMapper = objectMapper,
-            shippingCompletionService = shippingCompletionService,
             shippingCompletionWorker = shippingCompletionWorker
         )
     }
@@ -119,7 +118,7 @@ class ShippingServiceTest {
         every { shippingRepository.save(any<Shipping>()) } answers { firstArg() }
         every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
 
-        shippingService.completeShipping(shipping.id)
+        shippingCompletionService.complete(shipping.id)
 
         assertEquals(ShippingStatus.COMPLETED, shipping.status)
         assertNotNull(shipping.completedAt)

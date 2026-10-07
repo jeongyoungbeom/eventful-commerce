@@ -51,13 +51,6 @@ class AccountLockService(
         }
     }
 
-    fun getRemainingLockTime(lockable: Lockable): Long {
-        val lockedUntil = lockable.accountLockedUntil ?: return 0L
-        val now = Instant.now()
-        if (now.isAfter(lockedUntil)) return 0L
-        return ChronoUnit.SECONDS.between(now, lockedUntil)
-    }
-
     private fun save(lockable: Lockable) {
         when (lockable) {
             is User -> userRepository.save(lockable)

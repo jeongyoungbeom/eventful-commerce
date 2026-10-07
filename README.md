@@ -176,24 +176,7 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 Client → api-gateway(JWT 검증) → X-User-Id / X-User-Role 헤더 주입 → 하위 서비스
 ```
 
-공통 인증 모듈(`common-auth`)은 `JwtAuthenticationFilter`의 `additionalValidation()` hook을 제공합니다. user-service는 이를 오버라이드해 토큰 블랙리스트 체크를 추가합니다.
-
-```kotlin
-@Component
-class JwtAuthenticationFilter(
-    jwtTokenProvider: JwtTokenProvider,
-    private val tokenBlacklistService: TokenBlacklistService
-) : com.eventfulcommerce.common.auth.JwtAuthenticationFilter(jwtTokenProvider) {
-
-    override fun additionalValidation(token: String, response: HttpServletResponse): Boolean {
-        if (tokenBlacklistService.isBlacklisted(token)) {
-            response.sendError(401, "Token has been logged out")
-            return false
-        }
-        return true
-    }
-}
-```
+로그아웃 시 user-service가 Redis에 토큰을 블랙리스트로 등록하고, GatewayJwtFilter가 이후 요청에서 해당 토큰을 차단합니다. 하위 서비스는 GatewayAuthFilter로 전달된 사용자 정보를 인증에 사용합니다.
 
 ### 2. Outbox 패턴 — 이벤트 발행 신뢰성
 

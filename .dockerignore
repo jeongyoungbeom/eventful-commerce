@@ -29,9 +29,6 @@ DOCKER-README.md
 DOCKER-HUB-GUIDE.md
 DEV-INFRASTRUCTURE.md
 
-# Backup
-backup-old-docker-files/
-
 # Logs
 *.log
 logs/

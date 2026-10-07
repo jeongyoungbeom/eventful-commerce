@@ -43,32 +43,4 @@ class NotificationService(
         
         return savedNotification
     }
-
-    /**
-     * 사용자 알림 목록 조회
-     */
-    fun getUserNotifications(userId: UUID): List<Notification> {
-        return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId)
-    }
-
-    /**
-     * 알림 읽음 처리
-     */
-    @Transactional
-    fun markAsRead(notificationId: UUID): Boolean {
-        val notification = notificationRepository.findById(notificationId).orElse(null)
-            ?: return false
-        
-        notification.isRead = true
-        notificationRepository.save(notification)
-        
-        return true
-    }
-
-    /**
-     * 읽지 않은 알림 개수
-     */
-    fun getUnreadCount(userId: UUID): Long {
-        return notificationRepository.countByUserIdAndIsReadFalse(userId)
-    }
 }

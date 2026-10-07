@@ -5,7 +5,6 @@ import com.eventfulcommerce.settlement.domain.SettlementStatus
 import com.eventfulcommerce.settlement.domain.entity.Settlement
 import com.eventfulcommerce.settlement.dto.SettlementResponse
 import com.eventfulcommerce.settlement.dto.SettlementSummaryResponse
-import com.eventfulcommerce.settlement.exception.SettlementNotFoundException
 import com.eventfulcommerce.settlement.repository.SettlementRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.redisson.api.RedissonClient

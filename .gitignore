@@ -45,3 +45,7 @@ out/
 
 ### Verification Results ###
 scripts/results/
+
+### Local Agent Instructions ###
+AGENTS.md
+.agents/

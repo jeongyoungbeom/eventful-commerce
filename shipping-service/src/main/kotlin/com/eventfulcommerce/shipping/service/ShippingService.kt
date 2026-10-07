@@ -22,7 +22,6 @@ class ShippingService(
     private val shippingRepository: ShippingRepository,
     private val outboxEventService: OutboxEventService,
     private val objectMapper: ObjectMapper,
-    private val shippingCompletionService: ShippingCompletionService,
     private val shippingCompletionWorker: ShippingCompletionWorker
 ) {
 
@@ -90,10 +89,6 @@ class ShippingService(
         outboxEventService.record(listOf(outboxEvent))
 
         logger.info { "🚚 배송 시작: orderId=${shipping.orderId}, trackingNumber=${shipping.trackingNumber}" }
-    }
-
-    fun completeShipping(shippingId: UUID) {
-        shippingCompletionService.complete(shippingId)
     }
 
     private fun scheduleCompletionAfterCommit(shippingId: UUID) {

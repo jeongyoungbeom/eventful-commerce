@@ -9,9 +9,9 @@ include(
     "settlement-service",
     "order-service",
     "payment-service",
-//    "inventory-service",
+
     "shipping-service",
     "notification-service",
     "user-service",
-//    "integration-tests",
+
 )

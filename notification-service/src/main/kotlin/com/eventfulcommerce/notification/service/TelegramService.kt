@@ -2,7 +2,6 @@ package com.eventfulcommerce.notification.service
 
 import com.eventfulcommerce.notification.config.TelegramProperties
 import com.eventfulcommerce.notification.repository.UserChatIdRepository
-import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.boot.web.client.RestTemplateBuilder
 import org.springframework.stereotype.Service
@@ -15,7 +14,6 @@ private val logger = KotlinLogging.logger {}
 class TelegramService(
     private val telegramProperties: TelegramProperties,
     private val userChatIdRepository: UserChatIdRepository,
-    private val objectMapper: ObjectMapper,
     restTemplateBuilder: RestTemplateBuilder
 ) {
     private val restTemplate: RestTemplate = restTemplateBuilder.build()

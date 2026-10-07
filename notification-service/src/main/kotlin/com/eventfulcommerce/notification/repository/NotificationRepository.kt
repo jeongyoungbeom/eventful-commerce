@@ -11,8 +11,6 @@ import java.time.Instant
 import java.util.UUID
 
 interface NotificationRepository : JpaRepository<Notification, UUID> {
-    fun findByUserIdOrderByCreatedAtDesc(userId: UUID): List<Notification>
-    fun countByUserIdAndIsReadFalse(userId: UUID): Long
 
     fun findTop100ByDeliveryStatusInAndNextDeliveryAttemptAtLessThanEqualOrderByCreatedAtAsc(
         statuses: Collection<NotificationDeliveryStatus>,

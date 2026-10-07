@@ -11,9 +11,6 @@ dependencies {
 
     // Spring Security & JWT
     implementation("org.springframework.boot:spring-boot-starter-security")
-    implementation("io.jsonwebtoken:jjwt-api:0.12.3")
-    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
-    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.3")
     
     // Validation
     implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -29,10 +26,7 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
-    
-    // Kafka
-    implementation("org.springframework.kafka:spring-kafka")
-    
+
     // Mail
     implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
@@ -42,7 +36,4 @@ dependencies {
     
     // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.security:spring-security-test")
-    testImplementation("io.mockk:mockk:1.13.9")
-    testImplementation("com.ninja-squad:springmockk:4.0.2")
 }
