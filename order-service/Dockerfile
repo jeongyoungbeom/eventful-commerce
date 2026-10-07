@@ -1,5 +1,5 @@
 # Multi-stage build for order-service
-FROM gradle:8-jdk21-alpine AS build
+FROM gradle:8.14.5-jdk21-alpine AS build
 
 WORKDIR /app
 

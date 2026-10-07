@@ -1,7 +1,7 @@
 plugins {
-    kotlin("jvm") version "1.9.24" apply false
-    kotlin("plugin.spring") version "1.9.24" apply false
-    kotlin("plugin.jpa") version "1.9.24" apply false
+    kotlin("jvm") version "2.2.21" apply false
+    kotlin("plugin.spring") version "2.2.21" apply false
+    kotlin("plugin.jpa") version "2.2.21" apply false
 
     id("org.springframework.boot") version "3.3.5" apply false
     id("io.spring.dependency-management") version "1.1.6" apply false
@@ -18,6 +18,7 @@ subprojects {
 
     group = "com.yourapp"
     version = "0.0.1"
+    extra["kotlin.version"] = "2.2.21"
 
     // afterEvaluate로 감싸서 Configuration Phase 문제 해결
     afterEvaluate {

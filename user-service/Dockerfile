@@ -1,4 +1,4 @@
-FROM gradle:8.5-jdk21 AS build
+FROM gradle:8.14.5-jdk21 AS build
 WORKDIR /app
 
 # Gradle 캐시를 위한 파일들 먼저 복사
