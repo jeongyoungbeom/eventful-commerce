@@ -3,6 +3,7 @@ package com.eventfulcommerce.order.service
 import com.eventfulcommerce.common.*
 import com.eventfulcommerce.order.domain.OrdersStatus
 import com.eventfulcommerce.order.domain.entity.OrderItem
+import com.eventfulcommerce.order.domain.entity.OrderItemStatus
 import com.eventfulcommerce.order.request.OrdersRequest
 import com.eventfulcommerce.order.domain.entity.Orders
 import com.eventfulcommerce.order.domain.entity.SellerOrder
@@ -42,6 +43,7 @@ class OrdersService(
     private val idempotencyHandler: IdempotencyHandler,
     private val objectMapper: ObjectMapper,
     private val orderCancelService: OrderCancelService,
+    private val orderCancelExecutor: OrderCancelExecutor,
     private val orderSagaService: OrderSagaService,
     private val businessMetrics: EventfulBusinessMetrics,
     @Value("\${order.commission-rate:0.1}") private val commissionRate: Double,
@@ -225,84 +227,74 @@ class OrdersService(
         return OrderResponse.from(order).copy(failedItems = failedItems)
     }
 
-    @Transactional
+    @Transactional(rollbackFor = [Exception::class])
     fun handlePaymentCompleted(value: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(value.eventId) {
             val payload = objectMapper.readValue(value.payload, PaymentCompletedPayload::class.java)
-            val order = ordersRepository.findById(payload.orderId).orElseThrow {
-                IllegalStateException("주문을 찾을 수 없습니다: orderId=${payload.orderId}")
-            }
+            val order = ordersRepository.findByIdForUpdate(payload.orderId)
+                ?: throw IllegalStateException("주문을 찾을 수 없습니다: orderId=${payload.orderId}")
 
-            if (order.status == OrdersStatus.ORDER_CONFIRMED) {
-                logger.info { "이미 확인된 주문입니다: orderId=${order.id}" }
+            val targets = order.sellerOrders.filter { it.status == SellerOrderStatus.RESERVED }
+            if (targets.isEmpty()) {
+                logger.info { "확정할 예약 판매자 주문 없음: orderId=${order.id}, status=${order.status}" }
                 return@executeIdempotent
             }
-            if (order.status != OrdersStatus.ORDER_RESERVED) {
-                logger.error { "잘못된 주문 상태: orderId=${order.id}, status=${order.status}" }
-                return@executeIdempotent
+            check(order.status in listOf(OrdersStatus.ORDER_RESERVED, OrdersStatus.ORDER_PARTIALLY_CANCELED)) {
+                "잘못된 주문 상태: orderId=${order.id}, status=${order.status}"
             }
 
             orderSagaService.markPaymentCompleted(order.id)
             try {
-                order.sellerOrders.forEach { sellerOrder ->
+                targets.forEach { sellerOrder ->
                     sellerOrder.items.forEach { item ->
                         val result = inventoryReservationService.commit(
-                            item.productId.toString(),
-                            item.reservationId,
-                            item.quantity
+                            item.productId.toString(), item.reservationId, item.quantity
                         )
                         check(result.successful) {
                             "Inventory commit failed: orderId=${order.id}, productId=${item.productId}, " +
                                 "reservationId=${item.reservationId}, result=$result"
                         }
-                        item.status = com.eventfulcommerce.order.domain.entity.OrderItemStatus.CONFIRMED
+                        item.status = OrderItemStatus.CONFIRMED
                     }
                     sellerOrder.confirm()
                 }
-                order.recomputeStatus()
-                ordersRepository.save(order)
-                orderSagaService.markConfirmed(order.id)
+            } catch (exception: Exception) {
+                orderSagaService.requestCompensation(order.id, exception)
+                // 이미 DB 행 잠금을 보유한다. Redis 잠금을 다시 얻으면 일반 취소의 Redis→DB 순서와 역전된다.
+                if (orderCancelExecutor.executeInventoryCompensation(order.id, "SAGA_INVENTORY_CONFIRM_FAILED")) {
+                    orderSagaService.markRefundPending(order.id, targets.size)
+                }
+                businessMetrics.increment("order.payment", "compensation_requested")
+                return@executeIdempotent
+            }
 
-                val confirmedPayload = OrderConfirmedPayload(
+            order.recomputeStatus()
+            order.expiresAt = null
+            ordersRepository.save(order)
+            orderSagaService.markConfirmed(order.id)
+
+            val confirmedPayload = OrderConfirmedPayload(
                 orderId = order.id,
                 userId = order.userId,
-                totalAmount = order.totalPaymentAmount,
-                sellerOrders = order.sellerOrders.map {
-                    OrderConfirmedSellerPayload(
-                        sellerOrderId = it.id,
-                        sellerId = it.sellerId,
-                        paymentAmount = it.paymentAmount
-                    )
+                totalAmount = targets.sumOf { it.paymentAmount },
+                sellerOrders = targets.map {
+                    OrderConfirmedSellerPayload(it.id, it.sellerId, it.paymentAmount)
                 },
                 confirmedAt = Instant.now()
             )
-
-                outboxEventService.record(
-                    listOf(
-                        OutboxEvent(
-                            aggregateType = OrdersStatus.ORDER.toString(),
-                            aggregateId = order.id,
-                            eventType = OrdersStatus.ORDER_CONFIRMED.toString(),
-                            payload = objectMapper.writeValueAsString(confirmedPayload),
-                            status = OutboxStatus.PENDING
-                        )
+            outboxEventService.record(
+                listOf(
+                    OutboxEvent(
+                        aggregateType = OrdersStatus.ORDER.toString(),
+                        aggregateId = order.id,
+                        eventType = OrdersStatus.ORDER_CONFIRMED.toString(),
+                        payload = objectMapper.writeValueAsString(confirmedPayload),
+                        status = OutboxStatus.PENDING
                     )
                 )
-                businessMetrics.increment("order.payment", "confirmed")
-                logger.info { "주문 확정 완료: orderId=${order.id}" }
-            } catch (exception: Exception) {
-                orderSagaService.requestCompensation(order.id, exception)
-                when (orderCancelService.cancelForEvent(order.id, "SAGA_INVENTORY_CONFIRM_FAILED")) {
-                    OrderCancellationOutcome.CANCELED ->
-                        orderSagaService.markRefundPending(order.id, order.sellerOrders.size)
-                    OrderCancellationOutcome.ALREADY_CANCELED ->
-                        logger.info { "보상 취소가 이미 완료됨: orderId=${order.id}" }
-                    OrderCancellationOutcome.LOCK_UNAVAILABLE -> throw IllegalStateException(
-                        "Order cancellation lock is unavailable: orderId=${order.id}"
-                    )
-                }
-                businessMetrics.increment("order.payment", "compensation_requested")
-            }
+            )
+            businessMetrics.increment("order.payment", "confirmed")
+            logger.info { "주문 확정 완료: orderId=${order.id}, sellerOrders=${targets.size}" }
         }
     }
 
@@ -314,7 +306,19 @@ class OrdersService(
         }
     }
 
-    @Transactional
+    @Transactional(rollbackFor = [Exception::class])
+    fun handleShippingCancellationDecided(value: OutboxEventMessage) {
+        idempotencyHandler.executeIdempotent(value.eventId) {
+            val payload = objectMapper.readValue(value.payload, ShippingCancellationDecidedPayload::class.java)
+            val reason = orderCancelExecutor.completeShippingCancellation(payload)
+            if (reason == "SAGA_SHIPPING_FAILED") {
+                orderSagaService.requestCompensation(payload.orderId, IllegalStateException(reason))
+                orderSagaService.markRefundPending(payload.orderId, 1)
+            }
+        }
+    }
+
+    @Transactional(rollbackFor = [Exception::class])
     fun handleShippingFailed(value: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(value.eventId) {
             val payload = objectMapper.readValue(value.payload, ShippingFailedPayload::class.java)
@@ -329,6 +333,7 @@ class OrdersService(
                     orderSagaService.requestCompensation(payload.orderId, IllegalStateException(payload.reason))
                     orderSagaService.markRefundPending(payload.orderId, 1)
                 }
+                OrderCancellationOutcome.PENDING, OrderCancellationOutcome.REJECTED -> Unit
                 OrderCancellationOutcome.ALREADY_CANCELED ->
                     logger.info { "배송 실패 대상 판매자 주문이 이미 취소됨: sellerOrderId=${payload.sellerOrderId}" }
                 OrderCancellationOutcome.LOCK_UNAVAILABLE -> throw IllegalStateException(
@@ -367,7 +372,7 @@ class OrdersService(
     fun getSellerOrders(sellerId: UUID): List<SellerOrderResponse> =
         sellerOrderRepository.findBySellerIdWithItemsOrderByCreatedAtDesc(sellerId).map { SellerOrderResponse.from(it) }
 
-    fun cancelOrder(orderId: UUID, userId: UUID): Boolean {
+    fun cancelOrder(orderId: UUID, userId: UUID): OrderCancellationOutcome {
         val order = ordersRepository.findById(orderId).orElse(null)
             ?: throw OrderNotFoundException(orderId)
 
@@ -376,17 +381,17 @@ class OrdersService(
             throw OrderForbiddenException(orderId)
         }
 
-        val canceled = orderCancelService.cancel(orderId, "사용자 요청")
-        businessMetrics.increment("order.cancel", if (canceled) "success" else "failed")
+        val canceled = orderCancelService.cancelForEvent(orderId, "사용자 요청")
+        businessMetrics.increment("order.cancel", canceled.name.lowercase())
         return canceled
     }
 
-    fun cancelSellerOrder(orderId: UUID, sellerOrderId: UUID, userId: UUID): Boolean {
+    fun cancelSellerOrder(orderId: UUID, sellerOrderId: UUID, userId: UUID): OrderCancellationOutcome {
         val order = ordersRepository.findById(orderId).orElse(null)
             ?: throw OrderNotFoundException(orderId)
         if (order.userId != userId) throw OrderForbiddenException(orderId)
-        val canceled = orderCancelService.cancelSellerOrder(orderId, sellerOrderId, "사용자 요청")
-        businessMetrics.increment("order.cancel.seller_order", if (canceled) "success" else "failed")
+        val canceled = orderCancelService.cancelSellerOrderForEvent(orderId, sellerOrderId, "사용자 요청")
+        businessMetrics.increment("order.cancel.seller_order", canceled.name.lowercase())
         return canceled
     }
 

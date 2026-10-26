@@ -24,7 +24,7 @@ class OrderCancelService(
      * 호출자가 예외를 던져 메시지 재시도를 유도할 수 있도록 결과를 구분한다.
      */
     fun cancelForEvent(orderId: UUID, reason: String): OrderCancellationOutcome =
-        withOrderLock(orderId, reason) { orderCancelExecutor.execute(orderId, reason) }
+        withOrderLock(orderId, reason) { orderCancelExecutor.request(orderId, null, reason) }
 
     fun cancelSellerOrderForEvent(
         orderId: UUID,
@@ -32,13 +32,13 @@ class OrderCancelService(
         reason: String
     ): OrderCancellationOutcome =
         withOrderLock(orderId, reason) {
-            orderCancelExecutor.executeSellerOrder(orderId, sellerOrderId, reason)
+            orderCancelExecutor.request(orderId, sellerOrderId, reason)
         }
 
     private fun withOrderLock(
         orderId: UUID,
         reason: String,
-        action: () -> Boolean
+        action: () -> OrderCancellationOutcome
     ): OrderCancellationOutcome {
         val lock = redissonClient.getLock("order:cancel:$orderId")
         return try {
@@ -48,7 +48,7 @@ class OrderCancelService(
                 return OrderCancellationOutcome.LOCK_UNAVAILABLE
             }
             try {
-                if (action()) OrderCancellationOutcome.CANCELED else OrderCancellationOutcome.ALREADY_CANCELED
+                action()
             } finally {
                 if (lock.isHeldByCurrentThread) lock.unlock()
             }
@@ -65,6 +65,8 @@ class OrderCancelService(
 
 enum class OrderCancellationOutcome {
     CANCELED,
+    PENDING,
+    REJECTED,
     ALREADY_CANCELED,
     LOCK_UNAVAILABLE
 }

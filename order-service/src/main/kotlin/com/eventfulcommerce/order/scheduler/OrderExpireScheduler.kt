@@ -39,8 +39,7 @@ class OrderExpireScheduler(
         
         expiredOrders.forEach { order ->
             try {
-                orderExpirationService.expireOrder(order.id)
-                successCount++
+                if (orderExpirationService.expireOrder(order.id)) successCount++
             } catch (e: OptimisticLockException) {
                 logger.info { "주문이 이미 다른 프로세스에 의해 처리됨 (낙관적 락): orderId=${order.id}" }
                 conflictCount++

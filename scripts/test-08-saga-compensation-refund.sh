@@ -21,6 +21,7 @@ cleanup_test_data() {
 
 require_cmd curl
 require_cmd jq
+require_payment_simulation
 require_cmd docker
 
 TS=$(date +%s)
@@ -55,8 +56,8 @@ SELLER_ORDER_ID=$(jq -r '.sellerOrders[0].sellerOrderId' <<< "$RESPONSE_BODY")
 echo "[단계] 결제 예약 후 결제 완료 및 주문 확정"
 wait_for_db_value payment_service "select count(*) from payment where order_id='$ORDER_ID';" "1" 60 \
   || fail_test "결제 예약이 생성되지 않았습니다"
-http_json POST "$GATEWAY_URL/api/payments/webhook" \
-  "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-SAGA-$TS\",\"amount\":$PAYMENT_AMOUNT}"
+simulate_payment \
+  "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-SAGA-$TS\",\"amount\":$PAYMENT_AMOUNT}" "$USER_TOKEN"
 [[ "$RESPONSE_STATUS" == "200" ]] || fail_test "결제 웹훅 실패: HTTP $RESPONSE_STATUS $RESPONSE_BODY"
 wait_for_order_status "$ORDER_ID" "ORDER_CONFIRMED" 60 || fail_test "주문이 ORDER_CONFIRMED가 되지 않았습니다"
 wait_for_redis_value "$STOCK_KEY" "$EXPECTED_SOLD_STOCK" 30 || fail_test "확정 주문의 Redis 재고가 기대값과 다릅니다"

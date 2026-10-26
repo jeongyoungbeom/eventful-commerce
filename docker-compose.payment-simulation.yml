@@ -1,0 +1,6 @@
+# 로컬 개발에서만 기본 compose와 함께 명시적으로 적용한다.
+services:
+  payment-service:
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,payment-simulation
+      PAYMENT_SIMULATION_TOKEN: ${PAYMENT_SIMULATION_TOKEN:?Set PAYMENT_SIMULATION_TOKEN for local simulation}

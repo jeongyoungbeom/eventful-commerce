@@ -1,6 +1,7 @@
 package com.eventfulcommerce.settlement.service
 
-import com.eventfulcommerce.settlement.config.SettlementConfig
+import com.eventfulcommerce.common.PaymentRefundedPayload
+import com.eventfulcommerce.settlement.repository.SettlementRefundRepository
 import com.eventfulcommerce.settlement.domain.SettlementStatus
 import com.eventfulcommerce.settlement.domain.entity.Settlement
 import com.eventfulcommerce.settlement.repository.SettlementRepository
@@ -14,12 +15,14 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.redisson.api.RLock
 import org.redisson.api.RedissonClient
+import java.time.Instant
 import java.util.Optional
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class SettlementServiceTest {
     private lateinit var settlementRepository: SettlementRepository
+    private lateinit var settlementRefundRepository: SettlementRefundRepository
     private lateinit var settlementPayExecutor: SettlementPayExecutor
     private lateinit var redissonClient: RedissonClient
     private lateinit var settlementService: SettlementService
@@ -27,11 +30,12 @@ class SettlementServiceTest {
     @BeforeEach
     fun setUp() {
         settlementRepository = mockk()
+        settlementRefundRepository = mockk()
         settlementPayExecutor = mockk()
         redissonClient = mockk(relaxed = true)
         settlementService = SettlementService(
             settlementRepository = settlementRepository,
-            settlementConfig = SettlementConfig(platformFeeRate = 0.1),
+            settlementRefundRepository = settlementRefundRepository,
             settlementPayExecutor = settlementPayExecutor,
             redissonClient = redissonClient
         )
@@ -88,9 +92,12 @@ class SettlementServiceTest {
     fun `환불 이벤트는 정산 금액과 수수료를 차감하고 부분 환불 상태로 변경한다`() {
         val sellerOrderId = UUID.randomUUID()
         val settlement = settlementFixture(sellerOrderId = sellerOrderId, totalAmount = 20_000, platformFee = 2_000, sellerAmount = 18_000)
-        every { settlementRepository.findBySellerOrderId(sellerOrderId) } returns settlement
+        val payload = refundPayload(settlement)
+        every { settlementRepository.findBySellerOrderIdForUpdate(sellerOrderId) } returns settlement
+        every { settlementRefundRepository.findById(payload.refundId) } returns Optional.empty()
+        every { settlementRefundRepository.saveAndFlush(any()) } answers { firstArg() }
 
-        settlementService.applyRefund(sellerOrderId, refundAmount = 5_000)
+        settlementService.applyRefund(payload)
 
         assertEquals(15_000, settlement.totalAmount)
         assertEquals(1_500, settlement.platformFee)
@@ -119,12 +126,18 @@ class SettlementServiceTest {
     @Test
     fun `refund is retried when settlement prerequisite is not visible yet`() {
         val sellerOrderId = UUID.randomUUID()
-        every { settlementRepository.findBySellerOrderId(sellerOrderId) } returns null
+        every { settlementRepository.findBySellerOrderIdForUpdate(sellerOrderId) } returns null
 
         assertThrows(IllegalStateException::class.java) {
-            settlementService.applyRefund(sellerOrderId, refundAmount = 5_000)
+            settlementService.applyRefund(refundPayload(settlementFixture(sellerOrderId = sellerOrderId)))
         }
     }
+
+    private fun refundPayload(settlement: Settlement) = PaymentRefundedPayload(
+        refundId = UUID.randomUUID(), paymentId = settlement.paymentId, orderId = settlement.orderId,
+        sellerOrderId = settlement.sellerOrderId, sellerId = settlement.sellerId, amount = 5_000,
+        reason = "부분 취소", refundedAt = Instant.now()
+    )
 
     private fun settlementFixture(
         sellerOrderId: UUID = UUID.randomUUID(),

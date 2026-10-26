@@ -51,6 +51,19 @@ class SellerOrder(
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancellation_status", nullable = false)
+    var cancellationStatus: CancellationStatus = CancellationStatus.NONE
+
+    @Column(name = "cancellation_request_id", unique = true)
+    var cancellationRequestId: UUID? = null
+
+    @Column(name = "cancellation_reason")
+    var cancellationReason: String? = null
+
+    @Column(name = "cancellation_requested_at")
+    var cancellationRequestedAt: java.time.Instant? = null
+
     fun addItem(item: OrderItem) {
         items.add(item)
     }

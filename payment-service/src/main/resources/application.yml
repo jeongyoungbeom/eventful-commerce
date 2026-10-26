@@ -73,3 +73,9 @@ management:
 #  level:
 #    org.hibernate.SQL: debug
 #    org.hibernate.orm.jdbc.bind: trace   # 파라미터 바인딩 로그(너무 시끄러우면 info로)
+
+# 명시적인 payment-simulation 프로필에서도 별도 enabled/token 설정을 요구한다.
+payment:
+  simulation:
+    enabled: false
+    token: ${PAYMENT_SIMULATION_TOKEN:}

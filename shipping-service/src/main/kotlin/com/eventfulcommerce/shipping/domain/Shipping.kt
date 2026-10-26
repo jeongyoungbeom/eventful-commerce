@@ -38,6 +38,12 @@ class Shipping(
     var completedAt: Instant? = null
 ) {
 
+    @Column(name = "cancellation_request_id", unique = true)
+    var cancellationRequestId: UUID? = null
+
+    @Column(name = "cancellation_approved")
+    var cancellationApproved: Boolean? = null
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID

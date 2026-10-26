@@ -152,6 +152,7 @@ wait_payment_record() {
 
 require_cmd curl
 require_cmd jq
+require_payment_simulation
 require_cmd docker
 
 TS=$(date +%s)
@@ -208,7 +209,7 @@ if ! wait_payment_record "$ORDER_ID" 60; then
 fi
 
 echo "[단계] 결제 성공 웹훅 호출"
-http_json POST "$GATEWAY_URL/api/payments/webhook" "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-IDEM-$TS\",\"amount\":12000}"
+simulate_payment "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-IDEM-$TS\",\"amount\":12000}" "$USER_TOKEN"
 [[ "$RESPONSE_STATUS" == "200" ]] || { MESSAGE="결제 웹훅 실패: HTTP $RESPONSE_STATUS $RESPONSE_BODY"; exit 1; }
 
 echo "[단계] PAYMENT_COMPLETED 아웃박스 메시지 조회"

@@ -14,6 +14,9 @@ class ShippingEventsConsumer(
     @KafkaListener(topics = ["shipping-events"], groupId = "order-service-group")
     fun receive(value: String) {
         val event = objectMapper.readValue(value, OutboxEventMessage::class.java)
-        if (event.eventType == "SHIPPING_FAILED") ordersService.handleShippingFailed(event)
+        when (event.eventType) {
+            "SHIPPING_FAILED" -> ordersService.handleShippingFailed(event)
+            "SHIPPING_CANCELLATION_DECIDED" -> ordersService.handleShippingCancellationDecided(event)
+        }
     }
 }

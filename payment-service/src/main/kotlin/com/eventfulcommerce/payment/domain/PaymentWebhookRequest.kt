@@ -7,10 +7,10 @@ import java.util.UUID
 data class PaymentWebhookRequest(
     @field:Schema(description = "결제 대상 주문 ID", required = true)
     val orderId: UUID,
-    @field:Schema(description = "결제 결과. SUCCESS면 결제 완료, 그 외 값은 결제 실패로 처리합니다.", example = "SUCCESS", required = true)
+    @field:Schema(description = "결제 결과. SUCCESS 또는 FAILED만 허용합니다.", example = "SUCCESS", required = true)
     val result: String,
-    @field:Schema(description = "PG 거래 ID", example = "PG-20260514-0001")
+    @field:Schema(description = "PG 거래 ID. 필수이며 다른 결제에 재사용할 수 없습니다.", example = "PG-20260514-0001", required = true)
     val pgTxId: String? = null,
-    @field:Schema(description = "PG에서 전달한 결제 금액. 현재 검증용 보조 값입니다.", example = "58000")
+    @field:Schema(description = "결제 금액. 필수이며 예약 금액과 같아야 합니다.", example = "58000", required = true)
     val amount: Long? = null,
 )

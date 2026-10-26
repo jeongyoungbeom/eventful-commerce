@@ -21,13 +21,13 @@ class ShippingCompletionService(
     private val outboxEventService: OutboxEventService,
     private val objectMapper: ObjectMapper
 ) {
-    @Transactional
+    @Transactional(rollbackFor = [Exception::class])
     fun complete(shippingId: UUID) {
         val shipping = shippingRepository.findByIdForUpdate(shippingId) ?: run {
             completionLogger.warn { "배송을 찾을 수 없음: shippingId=$shippingId" }
             return
         }
-        if (shipping.status == ShippingStatus.COMPLETED || shipping.status == ShippingStatus.FAILED) return
+        if (shipping.status in setOf(ShippingStatus.COMPLETED, ShippingStatus.FAILED, ShippingStatus.CANCELED)) return
         check(shipping.status == ShippingStatus.STARTED) {
             "Shipping is not ready to complete: shippingId=$shippingId, status=${shipping.status}"
         }

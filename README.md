@@ -111,8 +111,8 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
   └─► order-events(ORDER_RESERVED) 발행
         └─► payment-service: 결제 레코드 생성
 
-[PG사 웹훅] POST /payments/webhook
-  └─► payment-events(PAYMENT_COMPLETED) 발행
+[PG사 웹훅] POST /payments/webhook (PG 검증자 필요, 미구성 503)
+  └─► 발신자·금액·거래·결과 검증 후 payment-events(PAYMENT_COMPLETED) 발행
         └─► order-service: 예약 재고 확정 + ORDER_CONFIRMED 발행
               └─► shipping-service: SellerOrder별 배송 생성
               └─► settlement-service: SellerOrder별 정산 생성 (PENDING)
@@ -516,10 +516,12 @@ POST /api/orders/{orderId}/seller-orders/{sellerOrderId}/cancel
 ```bash
 # PG사 결제 결과 웹훅
 POST /api/payments/webhook
-{ "orderId": "uuid", "result": "SUCCESS", "pgTxId": "PG-TX-123" }
+{ "orderId": "uuid", "result": "SUCCESS", "pgTxId": "PG-TX-123", "amount": 58000 }
 
 # 주문 취소 후 payment-service는 PaymentRefund를 생성하고 PAYMENT_REFUNDED 이벤트를 발행
 ```
+
+실제 수신은 PG 검증자 미구성 시 503으로 차단합니다. 로컬 시뮬레이션의 명시적 프로필·토큰·JWT 설정은 [웹훅 검증 계약](docs/payment-webhook-contract.md)을 참고하세요.
 
 ### Settlement Service
 
@@ -577,10 +579,12 @@ ORDER_ID=$(curl -s -X POST $BASE/orders \
   -H "Content-Type: application/json" \
   -d "{\"items\":[{\"productId\":\"$PRODUCT_ID\",\"quantity\":1}]}" | jq -r '.orderId')
 
-# 5. 결제 완료 웹훅
-curl -X POST $BASE/payments/webhook \
+# 5. 로컬 결제 시뮬레이션 (payment-simulation 프로필과 전용 토큰 필요)
+curl -X POST $BASE/payments/simulation/webhook \
+  -H "Authorization: Bearer $BUYER_TOKEN" \
+  -H "X-Payment-Simulation-Token: $PAYMENT_SIMULATION_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-TX-001\"}"
+  -d "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"LOCAL-$ORDER_ID\",\"amount\":10000}"
 
 # 6. 정산 확인
 curl $BASE/settlements/my \

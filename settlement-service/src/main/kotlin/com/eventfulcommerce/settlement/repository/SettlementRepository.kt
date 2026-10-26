@@ -2,7 +2,9 @@ package com.eventfulcommerce.settlement.repository
 
 import com.eventfulcommerce.settlement.domain.SettlementStatus
 import com.eventfulcommerce.settlement.domain.entity.Settlement
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.Instant
@@ -12,6 +14,10 @@ interface SettlementRepository : JpaRepository<Settlement, UUID> {
     fun existsByPaymentId(paymentId: UUID): Boolean
     fun findByPaymentId(paymentId: UUID): List<Settlement>
     fun findBySellerOrderId(sellerOrderId: UUID): Settlement?
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Settlement s WHERE s.sellerOrderId = :sellerOrderId")
+    fun findBySellerOrderIdForUpdate(@Param("sellerOrderId") sellerOrderId: UUID): Settlement?
     fun findBySellerIdOrderByCreatedAtDesc(sellerId: UUID): List<Settlement>
     fun findBySellerIdAndStatusOrderByCreatedAtDesc(sellerId: UUID, status: SettlementStatus): List<Settlement>
     fun findByStatusAndCreatedAtBefore(status: SettlementStatus, before: Instant): List<Settlement>

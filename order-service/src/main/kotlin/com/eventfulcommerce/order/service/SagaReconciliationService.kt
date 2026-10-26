@@ -52,7 +52,8 @@ class SagaReconciliationService(
         ) {
             when (orderCancelService.cancelForEvent(orderId, RECONCILIATION_REASON)) {
                 OrderCancellationOutcome.CANCELED,
-                OrderCancellationOutcome.ALREADY_CANCELED -> Unit
+                OrderCancellationOutcome.ALREADY_CANCELED,
+                OrderCancellationOutcome.PENDING, OrderCancellationOutcome.REJECTED -> Unit
                 OrderCancellationOutcome.LOCK_UNAVAILABLE -> throw IllegalStateException(
                     "Order cancellation lock is unavailable during saga reconciliation: orderId=$orderId"
                 )

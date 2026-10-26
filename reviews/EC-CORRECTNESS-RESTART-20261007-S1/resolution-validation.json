@@ -1,0 +1,121 @@
+{
+  "payment-service": {
+    "totals": {
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "suites": [
+      {
+        "name": "com.eventfulcommerce.payment.domain.entity.PaymentRefundTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.eventfulcommerce.payment.service.PaymentServiceTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.eventfulcommerce.payment.service.PaymentWebhookServiceTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "settlement-service": {
+    "totals": {
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "suites": [
+      {
+        "name": "com.eventfulcommerce.settlement.message.PaymentEventsConsumerTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.eventfulcommerce.settlement.service.SettlementRefundPostgresIntegrationTest",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.eventfulcommerce.settlement.service.SettlementServiceTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "task_id": "EC-CORRECTNESS-RESTART-20261007-S1",
+  "workflow": "workflow-apply-review",
+  "head": "96c0e240420ef003e363d7078410dc3a34abc741",
+  "finding": {
+    "REV-001": "ACCEPTED"
+  },
+  "files": {
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefund.kt": "84ad8c68b97c2bc1fe668034daf1fa1f1840fec0202a430bc1f3585105e74e07",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefundTest.kt": "0f01b8c0b664fab3a5dcb6ee98820fea13ff9918ab3d678ea844dbf5b1911d55",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentServiceTest.kt": "1fbba35ea35e36f3b6368a41d7e15a254c3f2661b04aca22948b2333c375f201",
+    "settlement-service/build.gradle.kts": "65cb18bfeb3d61ba9a72c3e861debde9aa2a089564e7c91ac5297050d301cd9d",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/Settlement.kt": "03ff6a695b79130c1b6cd7ccc61751072bf32cc328c35c7c655067b44dc1e793",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/SettlementRefund.kt": "1480b4238a356bd4ca04b2b5db6f0f6ae426e85ae76c32d8305a6403992e1192",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumer.kt": "d747af1c38bf27c124bfaa065ec69802caf846a321a16f8f161a162d5fe447ed",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRefundRepository.kt": "2c623ad272db3c9f97673b19e7c4bfb4f15cda20db73727f0b531929b4927176",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRepository.kt": "a90e3eb8ba6c6adbe074f29d689f78ea75a294f9f32b9bc503def98dc2ce35b0",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/service/SettlementService.kt": "7dbabca0203ec62b833f4fa80f1ccb6565d224f136cd9efa5fbe0c93059bc2be",
+    "settlement-service/src/main/resources/db/migration/V1__settlement_refund_idempotency.sql": "315f784b90ae5f4c3bf5e8e614b316cd28793304a0188e734bdee0007c2fee13",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumerTest.kt": "c723c0d9188e8b0e189b1faa7b74b87c26eb60b3b9781ce763f05404ec3c7be8",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementRefundPostgresIntegrationTest.kt": "f6d83a4695b30bf4bc1525068b21595483b680decabd7c644ffaaaa9ec5fc05b",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementServiceTest.kt": "6c5220619697c2fab80333d0f4af9d8c38ab60a0826a44e9b32a819044a14074"
+  },
+  "file_hash_manifest_sha256": "0fcc950d81fd152e7ee848076bf232af0b3cf14e11d7462804b30e4398a0298e",
+  "new_files": [
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefundTest.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/SettlementRefund.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRefundRepository.kt",
+    "settlement-service/src/main/resources/db/migration/V1__settlement_refund_idempotency.sql",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementRefundPostgresIntegrationTest.kt"
+  ],
+  "prior_review_files_matched_before_edit": true,
+  "unchanged_prior_files_verified": [
+    ".gitignore",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentServiceTest.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/Settlement.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/SettlementRefund.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumer.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRefundRepository.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRepository.kt",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/service/SettlementService.kt",
+    "settlement-service/src/main/resources/db/migration/V1__settlement_refund_idempotency.sql",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumerTest.kt",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementServiceTest.kt"
+  ],
+  "modified_prior_files": [
+    "settlement-service/build.gradle.kts",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementRefundPostgresIntegrationTest.kt"
+  ],
+  "tests_executed_this_session": true,
+  "build_tests_reused_as_up_to_date": true,
+  "git_diff_check": "passed",
+  "modified_prior_files_original_content_verified_by_reversing_session_edits": {
+    "settlement-service/build.gradle.kts": "cfd36015b71704fa80f60b1bb4ffd6ddba0a42582ae7c7b92a26cf91988bb10a",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementRefundPostgresIntegrationTest.kt": "594a32aafac10048b50c933e38ec273196ccd1e3fb6f2fa9601e27a2dd99c83f"
+  },
+  "final_code_hash_unchanged_after_document_updates": true,
+  "test_containers_removed": true
+}

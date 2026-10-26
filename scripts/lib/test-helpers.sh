@@ -139,6 +139,24 @@ http_json() {
   rm -f "$body_file"
 }
 
+# 실제 PG 경로를 호출하지 않는다. Gateway access JWT와 서비스 전용 토큰을 함께 사용한다.
+require_payment_simulation() {
+  [[ -n "${PAYMENT_SIMULATION_TOKEN:-}" ]] || fail_test "PAYMENT_SIMULATION_TOKEN을 설정하고 payment-service의 payment-simulation 프로필을 명시적으로 활성화하세요"
+}
+
+simulate_payment() {
+  local payload="$1" access_token="$2" body_file status
+  require_payment_simulation
+  [[ -n "$access_token" && "$access_token" != "null" ]] || fail_test "시뮬레이션에 사용자 access token이 필요합니다"
+  body_file=$(mktemp)
+  status=$(curl -sS -o "$body_file" -w "%{http_code}" -X POST "$GATEWAY_URL/api/payments/simulation/webhook" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+    -H "X-Payment-Simulation-Token: $PAYMENT_SIMULATION_TOKEN" -d "$payload" || printf "000")
+  RESPONSE_STATUS="${status: -3}"
+  RESPONSE_BODY=$(<"$body_file")
+  rm -f "$body_file"
+}
+
 http_product_create() {
   local token="$1" payload="$2" user_id="$3" role="${4:-SELLER}"
   local body_file status

@@ -1,0 +1,112 @@
+ M .gitignore
+ M README.md
+ M api-gateway/build.gradle.kts
+ M api-gateway/src/main/kotlin/com/eventfulcommerce/gateway/config/SecurityConfig.kt
+ M api-gateway/src/main/kotlin/com/eventfulcommerce/gateway/filter/GatewayJwtFilter.kt
+ M order-service/build.gradle.kts
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/controller/OrderController.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/domain/entity/SellerOrder.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/dto/OrderCancelResponse.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/dto/SellerOrderCancelResponse.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/dto/SellerOrderResponse.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/message/ShippingEventsConsumer.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/repository/OrdersRepository.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/repository/SellerOrderRepository.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/scheduler/OrderExpireScheduler.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/service/OrderCancelExecutor.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/service/OrderCancelService.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/service/OrderExpirationService.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/service/OrdersService.kt
+ M order-service/src/main/kotlin/com/eventfulcommerce/order/service/SagaReconciliationService.kt
+ M order-service/src/test/kotlin/com/eventfulcommerce/order/service/OrderCancelExecutorTest.kt
+ M order-service/src/test/kotlin/com/eventfulcommerce/order/service/OrderCancelServiceTest.kt
+ M order-service/src/test/kotlin/com/eventfulcommerce/order/service/OrdersServiceTest.kt
+ M payment-service/build.gradle.kts
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/controller/PaymentWebhookController.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/PaymentWebhookRequest.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/entity/Payment.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefund.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/exception/GlobalExceptionHandler.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/repository/PaymentRepository.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/service/PaymentService.kt
+ M payment-service/src/main/kotlin/com/eventfulcommerce/payment/service/PaymentWebhookService.kt
+ M payment-service/src/main/resources/application.yml
+ M payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentServiceTest.kt
+ M payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentWebhookServiceTest.kt
+ M scripts/lib/test-helpers.sh
+ M scripts/test-01-e2e-order-payment-flow.sh
+ M scripts/test-04-payment-event-idempotency.sh
+ M scripts/test-08-saga-compensation-refund.sh
+ M settlement-service/build.gradle.kts
+ M settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/SettlementBatchConfig.kt
+ M settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/Settlement.kt
+ M settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumer.kt
+ M settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRepository.kt
+ M settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/service/SettlementService.kt
+ M settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumerTest.kt
+ M settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementServiceTest.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/domain/Shipping.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/domain/ShippingStatus.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/message/PaymentEventsConsumer.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/repository/ShippingRepository.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/service/ShippingCompletionService.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/service/ShippingFailureService.kt
+ M shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/service/ShippingService.kt
+ M shipping-service/src/main/resources/application.yml
+ M shipping-service/src/test/kotlin/com/eventfulcommerce/shipping/service/ShippingServiceTest.kt
+?? api-gateway/src/test/kotlin/com/eventfulcommerce/gateway/config/PaymentWebhookSecurityTest.kt
+?? common-outbox/src/main/kotlin/com/eventfulcommerce/common/ShippingCancellationPayload.kt
+?? docker-compose.payment-simulation.yml
+?? docs/payment-webhook-contract.md
+?? order-service/src/main/kotlin/com/eventfulcommerce/order/domain/entity/CancellationStatus.kt
+?? order-service/src/main/kotlin/com/eventfulcommerce/order/scheduler/ShippingCancellationRecoveryScheduler.kt
+?? order-service/src/main/resources/db/migration/V4__shipping_cancellation_request.sql
+?? order-service/src/test/kotlin/com/eventfulcommerce/order/controller/OrderCancellationApiTest.kt
+?? order-service/src/test/kotlin/com/eventfulcommerce/order/service/OrderReservationPostgresIntegrationTest.kt
+?? payment-service/src/main/kotlin/com/eventfulcommerce/payment/controller/PaymentSimulationController.kt
+?? payment-service/src/main/kotlin/com/eventfulcommerce/payment/webhook/PaymentWebhookVerifier.kt
+?? payment-service/src/main/resources/application-payment-simulation.yml
+?? payment-service/src/main/resources/db/migration/V3__payment_concurrency_and_refund_bounds.sql
+?? payment-service/src/main/resources/db/migration/V4__payment_pg_transaction.sql
+?? payment-service/src/test/kotlin/com/eventfulcommerce/payment/controller/PaymentWebhookHttpTest.kt
+?? payment-service/src/test/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefundTest.kt
+?? payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentConcurrencyPostgresIntegrationTest.kt
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/RESOLUTION.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/REVIEW.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/resolution-validation.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/review-build.log
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/review-tests.log
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/review-validation.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S1/timestamp-reproduction.log
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/FullyRefundedReconciliationReproduction.java
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/RESOLUTION.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/REVIEW.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/reconciliation-reproduction.log
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/resolution-build.log
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/resolution-validation.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S2/review-validation.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S3/RESOLUTION.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S3/REVIEW.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/REVIEW.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/independent-review/artifact-manifest.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/independent-review/before-COMMERCE_REMEDIATION_PLAN.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/independent-review/before-DECISIONS.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/independent-review/before-HANDOFF.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/independent-review/before-TASK.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S4/independent-review/validation.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/REVIEW.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/artifact-manifest.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/before-COMMERCE_REMEDIATION_PLAN.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/before-DECISIONS.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/before-HANDOFF.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/before-TASK.md
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/development-artifact-manifest.json
+?? reviews/EC-CORRECTNESS-RESTART-20261007-S5/independent-review/validation.json
+?? settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/SettlementRefund.kt
+?? settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRefundRepository.kt
+?? settlement-service/src/main/resources/db/migration/V1__settlement_refund_idempotency.sql
+?? settlement-service/src/main/resources/db/migration/V2__settlement_confirmation_index.sql
+?? settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/config/SettlementBatchPostgresIntegrationTest.kt
+?? settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementRefundPostgresIntegrationTest.kt
+?? shipping-service/src/main/kotlin/com/eventfulcommerce/shipping/service/ShippingDispatchScheduler.kt
+?? shipping-service/src/main/resources/db/migration/V3__shipping_cancellation_decision.sql

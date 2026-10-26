@@ -30,7 +30,10 @@ dependencies {
 
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
 
+    testImplementation(project(":payment-service"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.mockk:mockk:1.13.9")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

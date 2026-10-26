@@ -18,10 +18,10 @@ class ShippingFailureService(
     private val outboxEventRepository: OutboxEventRepository,
     private val objectMapper: ObjectMapper
 ) {
-    @Transactional
+    @Transactional(rollbackFor = [Exception::class])
     fun fail(shippingId: UUID, exception: Exception) {
-        val shipping = shippingRepository.findById(shippingId).orElse(null) ?: return
-        if (shipping.status == ShippingStatus.COMPLETED || shipping.status == ShippingStatus.FAILED) return
+        val shipping = shippingRepository.findByIdForUpdate(shippingId) ?: return
+        if (shipping.status in setOf(ShippingStatus.COMPLETED, ShippingStatus.FAILED, ShippingStatus.CANCELED)) return
 
         shipping.status = ShippingStatus.FAILED
         val payload = ShippingFailedPayload(

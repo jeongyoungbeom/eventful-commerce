@@ -1,6 +1,8 @@
 package com.eventfulcommerce.settlement.service
 
-import com.eventfulcommerce.settlement.config.SettlementConfig
+import com.eventfulcommerce.common.PaymentRefundedPayload
+import com.eventfulcommerce.settlement.domain.entity.SettlementRefund
+import com.eventfulcommerce.settlement.repository.SettlementRefundRepository
 import com.eventfulcommerce.settlement.domain.SettlementStatus
 import com.eventfulcommerce.settlement.domain.entity.Settlement
 import com.eventfulcommerce.settlement.dto.SettlementResponse
@@ -18,7 +20,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class SettlementService(
     private val settlementRepository: SettlementRepository,
-    private val settlementConfig: SettlementConfig,
+    private val settlementRefundRepository: SettlementRefundRepository,
     private val settlementPayExecutor: SettlementPayExecutor,
     private val redissonClient: RedissonClient
 ) {
@@ -55,16 +57,22 @@ class SettlementService(
     }
 
     @Transactional
-    fun applyRefund(sellerOrderId: UUID, refundAmount: Long) {
-        val settlement = settlementRepository.findBySellerOrderId(sellerOrderId) ?: run {
-            logger.warn { "환불 대상 정산 없음: sellerOrderId=$sellerOrderId" }
-            throw IllegalStateException("Settlement prerequisite not found for refund: sellerOrderId=$sellerOrderId")
+    fun applyRefund(payload: PaymentRefundedPayload) {
+        val settlement = settlementRepository.findBySellerOrderIdForUpdate(payload.sellerOrderId)
+            ?: throw IllegalStateException("Settlement prerequisite not found for refund: sellerOrderId=${payload.sellerOrderId}")
+
+        require(payload.paymentId == settlement.paymentId && payload.orderId == settlement.orderId &&
+            payload.sellerId == settlement.sellerId) { "환불의 결제·주문·판매자가 정산과 일치하지 않습니다" }
+
+        settlementRefundRepository.findById(payload.refundId).orElse(null)?.let { receipt ->
+            require(receipt.matches(settlement, payload)) { "동일 refundId의 환불 내용이 일치하지 않습니다" }
+            return
         }
 
-        val refundPlatformFee = settlementConfig.calculatePlatformFee(refundAmount)
-        val refundSellerAmount = settlementConfig.calculateSellerAmount(refundAmount)
-        settlement.applyRefund(refundAmount, refundPlatformFee, refundSellerAmount)
-        logger.info { "정산 환불 차감 완료: sellerOrderId=$sellerOrderId, refundAmount=$refundAmount" }
+        settlement.applyRefund(payload.amount)
+        // 처리 기록과 정산 변경은 같은 트랜잭션이다. UNIQUE 충돌도 전체 변경을 롤백한다.
+        settlementRefundRepository.saveAndFlush(SettlementRefund(settlement, payload))
+        logger.info { "정산 환불 차감 완료: refundId=${payload.refundId}, sellerOrderId=${payload.sellerOrderId}" }
     }
 
     fun pay(settlementId: UUID): SettlementResponse {

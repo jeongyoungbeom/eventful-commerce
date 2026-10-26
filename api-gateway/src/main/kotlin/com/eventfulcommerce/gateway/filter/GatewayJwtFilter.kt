@@ -32,7 +32,6 @@ class GatewayJwtFilter(
             "/api/auth/refresh",
             "/api/auth/password",
             "/api/auth/email",
-            "/api/payments/webhook",
             "/actuator",
             "/swagger-ui",
             "/swagger-ui.html",
@@ -100,6 +99,8 @@ class GatewayJwtFilter(
 
     private fun isPublicPath(request: HttpServletRequest): Boolean {
         val uri = request.requestURI
+        // PG 웹훅만 JWT 없이 전달한다. 하위 경로·시뮬레이션은 일반 JWT 보호를 유지한다.
+        if (request.method == "POST" && uri == "/api/payments/webhook") return true
         if (PUBLIC_PATHS.any { uri == it || uri.startsWith("$it/") }) return true
         // 상품 목록/상세 조회는 비로그인 허용 (GET 전용, UUID 형식만 매칭하여 /my 등 특수 경로 제외)
         val uuidPattern = Regex("/api/products/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")

@@ -1,0 +1,15 @@
+{
+  ".workflow/COMMERCE_REMEDIATION_PLAN.md": "141266eb6065020f7a1858265f029e2eb1635aa338c067c8d2e52c49b3264bb3",
+  ".workflow/DECISIONS.md": "7f26d643304873ac9bc2ce6a9f4c43b27c51289eabe2c37f420f38534315739e",
+  ".workflow/HANDOFF.md": "c249cf29a41207d02fd0bdb5e94994b27f41e3bc9dce0f0fa1b9494f928af490",
+  ".workflow/TASK.md": "c3f92cf0d527f295929e506a6e44f8d95ccdecbfa120b03283761dc6b9c76aae",
+  ".workflow/results/EC-CORRECTNESS-RESTART-20261007-S6/artifact-manifest.json": "b457703dc189808a5624f6fddf3cf260f2b4b5e50661813851f68692c7dec8e4",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/REVIEW.md": "b85d9657bee7ee06fd6db1103912aa17b34fd31a2bdc02b2de593c815ef92f08",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/before-COMMERCE_REMEDIATION_PLAN.md": "29b8903ce1446b687e83ebb1795f545f6a653835e28f1943ca514ece37b723cf",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/before-DECISIONS.md": "200b4bfa3b94a5c1c575ef69f17375832d611a91a8f5d01f8e3580583d10d29c",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/before-HANDOFF.md": "24b1bf924e68066228b0c3dfadb60d3b80ab761115085024152b52482c65410e",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/before-TASK.md": "f2de2d3b451bc4d78cda6e68ef1db535f8f33a0c3773e0765e159c8322048422",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/development-artifact-manifest.json": "896854cad2a0cd3e41557e3545387ac8b702bd5e3f4e4f7e9201a1c8e09fc883",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/git-status-before.txt": "dd6ae7ea3f27c17185b0768f1f41af52d7519e62c86efcacf650ac202493b866",
+  "reviews/EC-CORRECTNESS-RESTART-20261007-S6/independent-review/validation.json": "8cac23a8e30794eaabb74ff16cb29880670861495d899775ccce2dca6f999881"
+}

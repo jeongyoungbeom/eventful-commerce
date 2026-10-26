@@ -46,6 +46,7 @@ dlt:
     token: ${DLT_OPERATIONS_TOKEN:}
 
 shipping:
+  preparation-delay-ms: 30000  # 준비 기간 이후 출고, 재기동 시 DB에서 복구
   completion-delay-ms: 10000  # 배송 완료까지 대기 시간 (ms), 테스트 시 줄여서 사용
 
 management:

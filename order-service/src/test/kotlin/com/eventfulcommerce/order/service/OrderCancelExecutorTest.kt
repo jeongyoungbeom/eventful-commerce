@@ -1,5 +1,6 @@
 package com.eventfulcommerce.order.service
 
+import com.eventfulcommerce.common.ShippingCancellationDecidedPayload
 import com.eventfulcommerce.common.BaseTimeEntity
 import com.eventfulcommerce.common.OutboxEvent
 import com.eventfulcommerce.common.OutboxEventService
@@ -10,7 +11,6 @@ import com.eventfulcommerce.order.domain.entity.Orders
 import com.eventfulcommerce.order.domain.entity.SellerOrder
 import com.eventfulcommerce.order.domain.entity.SellerOrderStatus
 import com.eventfulcommerce.order.repository.OrdersRepository
-import com.eventfulcommerce.order.repository.SellerOrderRepository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mockk.Runs
@@ -24,12 +24,10 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.util.Optional
 import java.util.UUID
 
 class OrderCancelExecutorTest {
     private lateinit var ordersRepository: OrdersRepository
-    private lateinit var sellerOrderRepository: SellerOrderRepository
     private lateinit var inventoryReservationService: InventoryReservationService
     private lateinit var outboxEventService: OutboxEventService
     private lateinit var objectMapper: ObjectMapper
@@ -38,7 +36,6 @@ class OrderCancelExecutorTest {
     @BeforeEach
     fun setUp() {
         ordersRepository = mockk()
-        sellerOrderRepository = mockk()
         inventoryReservationService = mockk()
         outboxEventService = mockk()
         objectMapper = jacksonObjectMapper()
@@ -54,7 +51,6 @@ class OrderCancelExecutorTest {
 
         orderCancelExecutor = OrderCancelExecutor(
             ordersRepository = ordersRepository,
-            sellerOrderRepository = sellerOrderRepository,
             inventoryReservationService = inventoryReservationService,
             outboxEventService = outboxEventService,
             objectMapper = objectMapper
@@ -65,7 +61,7 @@ class OrderCancelExecutorTest {
     fun `inventory release failure prevents order cancellation and outbox recording`() {
         val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.RESERVED))
         val item = order.sellerOrders.single().items.single()
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
         every {
             inventoryReservationService.release(item.productId.toString(), item.reservationId, item.quantity)
         } returns InventoryReservationActionResult.NOT_FOUND
@@ -81,22 +77,47 @@ class OrderCancelExecutorTest {
     }
 
     @Test
-    fun `confirmed inventory restock failure prevents cancellation and outbox recording`() {
-        val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.CONFIRMED))
+    fun `예약 상태 복구에서도 재고 검증 실패는 취소와 이벤트 기록을 막는다`() {
+        val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.RESERVED))
         val item = order.sellerOrders.single().items.single()
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
+        every {
+            inventoryReservationService.release(item.productId.toString(), item.reservationId, item.quantity)
+        } returns InventoryReservationActionResult.TERMINAL_CONFLICT
         every {
             inventoryReservationService.restock(item.productId.toString(), item.reservationId, item.quantity)
         } returns InventoryReservationActionResult.CORRUPTED
 
         org.junit.jupiter.api.assertThrows<IllegalStateException> {
-            orderCancelExecutor.execute(order.id, "inventory restock failure")
+            orderCancelExecutor.execute(order.id, "복구 검증 실패")
+        }
+
+        assertEquals(OrdersStatus.ORDER_RESERVED, order.status)
+        assertEquals(SellerOrderStatus.RESERVED, order.sellerOrders.single().status)
+        verify(exactly = 0) { ordersRepository.save(order) }
+        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+    }
+
+    @Test
+    fun `confirmed inventory restock failure prevents cancellation and outbox recording`() {
+        val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.CONFIRMED))
+        val item = order.sellerOrders.single().items.single()
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
+        every {
+            inventoryReservationService.restock(item.productId.toString(), item.reservationId, item.quantity)
+        } returns InventoryReservationActionResult.CORRUPTED
+
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            run {
+                orderCancelExecutor.request(order.id, null, "inventory restock failure")
+                orderCancelExecutor.completeShippingCancellation(decision(order))
+            }
         }
 
         assertEquals(OrdersStatus.ORDER_CONFIRMED, order.status)
         assertEquals(SellerOrderStatus.CONFIRMED, order.sellerOrders.single().status)
         verify(exactly = 0) { ordersRepository.save(order) }
-        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+        verify(exactly = 1) { outboxEventService.record(any<List<OutboxEvent>>()) }
     }
 
     @Test
@@ -105,7 +126,7 @@ class OrderCancelExecutorTest {
         val sellerOrder = order.sellerOrders.single()
         val item = sellerOrder.items.single()
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
 
         val canceled = orderCancelExecutor.execute(order.id, "사용자 요청")
 
@@ -134,16 +155,16 @@ class OrderCancelExecutorTest {
     }
 
     @Test
-    fun `확정 주문을 취소하면 재고를 보정하고 취소 이벤트를 기록한다`() {
+    fun `확정 주문은 배송 승인 뒤에만 재고를 보정하고 취소 이벤트를 기록한다`() {
         val order = orderFixture(sellerOrderStatuses = listOf(SellerOrderStatus.CONFIRMED))
         val sellerOrder = order.sellerOrders.single()
         val item = sellerOrder.items.single()
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
 
-        val canceled = orderCancelExecutor.execute(order.id, "확정 후 취소")
-
-        assertTrue(canceled)
+        assertEquals(OrderCancellationOutcome.PENDING, orderCancelExecutor.request(order.id, null, "확정 후 취소"))
+        verify(exactly = 0) { inventoryReservationService.restock(any<String>(), any<UUID>(), any<Int>()) }
+        assertEquals("확정 후 취소", orderCancelExecutor.completeShippingCancellation(decision(order)))
         assertEquals(OrdersStatus.ORDER_CANCELED, order.status)
         assertEquals(SellerOrderStatus.CANCELED, sellerOrder.status)
         verify(exactly = 0) {
@@ -153,7 +174,7 @@ class OrderCancelExecutorTest {
             inventoryReservationService.restock(item.productId.toString(), item.reservationId, item.quantity)
         }
         verify(exactly = 1) { ordersRepository.save(order) }
-        verify(exactly = 2) { outboxEventService.record(any<List<OutboxEvent>>()) }
+        verify(exactly = 3) { outboxEventService.record(any<List<OutboxEvent>>()) }
     }
 
     @Test
@@ -162,7 +183,7 @@ class OrderCancelExecutorTest {
             it.status = OrdersStatus.ORDER_CANCELED
         }
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
 
         val canceled = orderCancelExecutor.execute(order.id, "중복 취소")
 
@@ -184,8 +205,7 @@ class OrderCancelExecutorTest {
         val keptSellerOrder = order.sellerOrders.last()
         val targetItem = targetSellerOrder.items.single()
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
-        every { sellerOrderRepository.findById(targetSellerOrder.id) } returns Optional.of(targetSellerOrder)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
 
         val canceled = orderCancelExecutor.executeSellerOrder(
             orderId = order.id,
@@ -215,6 +235,10 @@ class OrderCancelExecutorTest {
             )
         }
     }
+
+    private fun decision(order: Orders) = ShippingCancellationDecidedPayload(
+        requireNotNull(order.sellerOrders.single().cancellationRequestId), order.id,
+        order.sellerOrders.single().id, order.userId, true)
 
     private fun orderFixture(sellerOrderStatuses: List<SellerOrderStatus>): Orders {
         val order = Orders(

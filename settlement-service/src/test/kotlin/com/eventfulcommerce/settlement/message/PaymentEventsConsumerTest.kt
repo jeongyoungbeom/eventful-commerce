@@ -89,11 +89,11 @@ class PaymentEventsConsumerTest {
             reason = "부분 취소",
             refundedAt = Instant.now()
         )
-        every { settlementService.applyRefund(payload.sellerOrderId, payload.amount) } just Runs
+        every { settlementService.applyRefund(payload) } just Runs
 
         consumer.consume(message("PAYMENT_REFUNDED", payload))
 
-        verify(exactly = 1) { settlementService.applyRefund(payload.sellerOrderId, payload.amount) }
+        verify(exactly = 1) { settlementService.applyRefund(payload) }
     }
 
     @Test
@@ -103,7 +103,7 @@ class PaymentEventsConsumerTest {
         verify(exactly = 0) {
             idempotencyHandler.executeIdempotent(any<UUID>(), any<() -> Unit>())
         }
-        verify(exactly = 0) { settlementService.applyRefund(any(), any()) }
+        verify(exactly = 0) { settlementService.applyRefund(any()) }
     }
 
     private fun message(eventType: String, payload: Any): String =

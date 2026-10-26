@@ -18,6 +18,8 @@ data class SellerOrderResponse(
     val commissionAmount: Long,
     val settlementAmount: Long,
     val status: SellerOrderStatus,
+    val cancellationStatus: com.eventfulcommerce.order.domain.entity.CancellationStatus,
+    val cancellationRequestId: UUID?,
     val items: List<OrderItemResponse>
 ) {
     companion object {
@@ -31,6 +33,8 @@ data class SellerOrderResponse(
             commissionAmount = sellerOrder.commissionAmount,
             settlementAmount = sellerOrder.settlementAmount,
             status = sellerOrder.status,
+            cancellationStatus = sellerOrder.cancellationStatus,
+            cancellationRequestId = sellerOrder.cancellationRequestId,
             items = sellerOrder.items.map {
                 OrderItemResponse(
                     orderItemId = it.id,

@@ -1,0 +1,298 @@
+{
+  "task_id": "EC-CORRECTNESS-RESTART-20261007-S2",
+  "workflow": "workflow-apply-review",
+  "date": "2026-10-19 (Asia/Seoul)",
+  "head": "96c0e240420ef003e363d7078410dc3a34abc741",
+  "finding": {
+    "id": "REV-001",
+    "severity": "Minor",
+    "decision": "ACCEPTED",
+    "resolved": true
+  },
+  "task_status": "completed",
+  "handoff_status": "inactive",
+  "next_workflow": "workflow-develop",
+  "next_task_id": "EC-CORRECTNESS-RESTART-20261007-S3",
+  "development_manifest_all_files_matched_before_changes": true,
+  "development_manifest_file_count": 118,
+  "command": "./gradlew :payment-service:build :settlement-service:build --offline --no-daemon --console=plain --max-workers=2",
+  "build_result": "BUILD SUCCESSFUL in 48s",
+  "test_tasks_actually_executed": [
+    "payment-service",
+    "settlement-service"
+  ],
+  "test_results": {
+    "payment-service": {
+      "totals": {
+        "tests": 49,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.eventfulcommerce.payment.domain.entity.PaymentRefundTest",
+          "file": "payment-service/build/test-results/test/TEST-com.eventfulcommerce.payment.domain.entity.PaymentRefundTest.xml",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "e64013d7cb992d27f1e83b4cc473311f3efc60caccfcae2b472b2f9383ac3e05"
+        },
+        {
+          "name": "com.eventfulcommerce.payment.service.PaymentConcurrencyPostgresIntegrationTest",
+          "file": "payment-service/build/test-results/test/TEST-com.eventfulcommerce.payment.service.PaymentConcurrencyPostgresIntegrationTest.xml",
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "acadb4e58f7d3d94ba1d3edcee891d32203f08440c3ea13761e9ba36a639a4ba"
+        },
+        {
+          "name": "com.eventfulcommerce.payment.service.PaymentServiceTest",
+          "file": "payment-service/build/test-results/test/TEST-com.eventfulcommerce.payment.service.PaymentServiceTest.xml",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "2444d92e8b5c498a98aa09f34016b5802c18116ecb2385673da0c7f910665fd1"
+        },
+        {
+          "name": "com.eventfulcommerce.payment.service.PaymentWebhookServiceTest",
+          "file": "payment-service/build/test-results/test/TEST-com.eventfulcommerce.payment.service.PaymentWebhookServiceTest.xml",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "bd5a5a39baa7721ace55df87640195a1b17db62f84ee2295d616d91eb876f6d9"
+        }
+      ]
+    },
+    "settlement-service": {
+      "totals": {
+        "tests": 27,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "suites": [
+        {
+          "name": "com.eventfulcommerce.settlement.message.PaymentEventsConsumerTest",
+          "file": "settlement-service/build/test-results/test/TEST-com.eventfulcommerce.settlement.message.PaymentEventsConsumerTest.xml",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "12f3839d291fb9dbdce8579e8510d3b70a5c20f69dc7bf5b135330cd86c95749"
+        },
+        {
+          "name": "com.eventfulcommerce.settlement.service.SettlementRefundPostgresIntegrationTest",
+          "file": "settlement-service/build/test-results/test/TEST-com.eventfulcommerce.settlement.service.SettlementRefundPostgresIntegrationTest.xml",
+          "tests": 19,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "4e207095383b50ad205cb25a3c276ce8b34eeb07dcb139af4d8f79306a8d9a73"
+        },
+        {
+          "name": "com.eventfulcommerce.settlement.service.SettlementServiceTest",
+          "file": "settlement-service/build/test-results/test/TEST-com.eventfulcommerce.settlement.service.SettlementServiceTest.xml",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "668d356c816f4db04f9fb9d5a7a86e10effd7aacfe226b6b4e4200c41e0fdf52"
+        }
+      ]
+    }
+  },
+  "totals": {
+    "tests": 76,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "postgres_tests": 54,
+  "new_postgres_test_cases": [
+    {
+      "name": "[1] fullyRefunded=false",
+      "classname": "com.eventfulcommerce.payment.service.PaymentConcurrencyPostgresIntegrationTest",
+      "time": "0.127"
+    },
+    {
+      "name": "[2] fullyRefunded=true",
+      "classname": "com.eventfulcommerce.payment.service.PaymentConcurrencyPostgresIntegrationTest",
+      "time": "0.107"
+    },
+    {
+      "name": "[1] fullyRefunded=false",
+      "classname": "com.eventfulcommerce.payment.service.PaymentConcurrencyPostgresIntegrationTest",
+      "time": "0.382"
+    },
+    {
+      "name": "[2] fullyRefunded=true",
+      "classname": "com.eventfulcommerce.payment.service.PaymentConcurrencyPostgresIntegrationTest",
+      "time": "0.326"
+    }
+  ],
+  "regression_coverage": {
+    "states": [
+      "PAYMENT_PARTIALLY_REFUNDED",
+      "PAYMENT_REFUNDED"
+    ],
+    "invalid_input_kinds_per_state": 9,
+    "invalid_input_rollback": true,
+    "same_event_id_corrected_retry": true,
+    "original_refund_payload_republished": true,
+    "different_event_id_and_reason": true,
+    "duplicate_event_id_no_extra_outbox": true,
+    "additional_refund_or_balance_change": false
+  },
+  "schema_migration_applied_in_isolated_test": "V3__payment_concurrency_and_refund_bounds.sql",
+  "git_diff_check": "passed",
+  "session_added_line_whitespace_check": "passed",
+  "baseline_git_files": 391,
+  "unchanged_baseline_git_files": 388,
+  "modified_baseline_git_files": [
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/service/PaymentService.kt",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentConcurrencyPostgresIntegrationTest.kt",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentServiceTest.kt"
+  ],
+  "validated_file_hashes": {
+    "common-idempotency/build.gradle.kts": "ba798943f19091965a52b14c19e95b2c8da2fa315802f0caffe45f1d1d7596b1",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/DeadLetterEvent.kt": "079f13f14e572fe918973e65809c98b7b6643139e74d91793364e10ce632993c",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/DeadLetterEventConsumer.kt": "846945bc890596f7987ab62e4b0be4e7e7e66a2b705b64576f413c2f9ad78706",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/DeadLetterEventService.kt": "67be0ed8a25abd9b95243beca1c372b6c1eb6953ae69045307b230e6d6a29ef5",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/DeadLetterEventStatus.kt": "849708ab7ad5f95fb99c3a61d61e3e8ead8a2d533085f35b241842576ebd07cb",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/DeadLetterKafkaConfig.kt": "1a2abb1df0ae2e67b3e7e7f5b3d52f7bf06ccf45840aaaa9485ca69aae3232fe",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/IdempotencyHandler.kt": "38500c2918ced434cea7e254bb2775aec46d5e792c8d417b9c83107e66adca4a",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/ProcessedEvent.kt": "ed48f550c3c3e3cfd68c4c21dde03ce76107443a0b64573a75011ab1480186f3",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/ProcessedEventCleanupScheduler.kt": "b49405514aa477923d39a47559873103c341075ec0b9fc797aca65cfbb8a3d93",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/api/DeadLetterOperationsController.kt": "de4bcd68b1ff51f139b4d4843f15280aa1aa3ec88651df61a30fa468ce25f80e",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/api/response/DeadLetterEventListResponse.kt": "f5e9b89740492a1dcf4368631bfbfb07882167e4a95756290ff86c07c53ec9eb",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/api/response/DeadLetterEventResponse.kt": "6f7c1e99aacc7e84a408b0c162aac9c44417cc39a0a5cf0f1da83a25e6bec2ec",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/api/response/DeadLetterReplayResponse.kt": "a69316424bbdda555e195adbd856acdca49f0ddbc5f0c5b95872f9df04c0d3ee",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/metrics/DeadLetterEventMetrics.kt": "71f641f623669370b9d48cd1bdfc24b2a21750d4ea13c74e7c4f5df4fd31da1f",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/operations/DeadLetterOperationsService.kt": "33c6c22f4f2631c5cb89b415b961b3506be8741bdf3ffe7dcf97b59f249c5629",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/repository/DeadLetterEventRepository.kt": "dbdda83e647065cff854eca831779c7aa8b76702b4ad3cf951b8897df128fb80",
+    "common-idempotency/src/main/kotlin/com/eventfulcommerce/common/repository/ProcessedEventRepository.kt": "1dcd200bd6cc92fbc99431d8650d5cd1d1b9672094832d9bf16783181070d9f4",
+    "common-idempotency/src/main/resources/db/migration/V20__processed_event_retention_index.sql": "2892e825444e16a3e0d1d36ab2553d25f8cbaaef9594586b165f0fbe1beb2f92",
+    "common-idempotency/src/main/resources/db/migration/V21__dead_letter_event.sql": "362e1c790f390a19f7966408b8647deed6db8daf72b5acd65e20d4177434e361",
+    "common-idempotency/src/test/kotlin/com/eventfulcommerce/common/DeadLetterEventServiceTest.kt": "32c327d86f5134ea51a03d27e3d810649f53f5a9ac4f5bc875ffba5f4609ae0e",
+    "common-idempotency/src/test/kotlin/com/eventfulcommerce/common/IdempotencyHandlerPostgresIntegrationTest.kt": "88e30c6392735100b449cdf04da872ed2cdcf58eebeea6f2b37ff171bc94a3f2",
+    "common-idempotency/src/test/kotlin/com/eventfulcommerce/common/IdempotencyHandlerTest.kt": "35d489dbee6487c76aa0faa6e9b517c838873ed8f143b85dd3da4f70de304adf",
+    "common-outbox/build.gradle.kts": "be9ba334c1944d4dcb685a9b16d334e6f4dfddafdc1187d0840d06a6ca5d5ccc",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/BaseTimeEntity.kt": "63d6c010bced3904269192a344dea422f052c4608cb54f6f3941bea7b4cab525",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/InventoryStockAdjustedPayload.kt": "d0172a1cf46cdf4c182bf03d3ef4ec633bae406493b62262a4e295aed2733641",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/InventoryStockSnapshotPayload.kt": "df7166581a30a7e82252726bf3ec8923e24a9c97496d031ab43ae0de2abd48d9",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OrderCanceledPayload.kt": "2d284d0629ccd41cdd2e723aae5e299aab374a39de8240968d97d31678bdadc6",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OrderConfirmedPayload.kt": "ae6eaec436d0f96230f0269883f0a185c6605bdc67dea8fc4293337237409563",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OrderReservedPayload.kt": "c37fe27a8f49d305bd94ab950da754e9378e2cbb768e105fd88239ece7584c75",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxCleanupScheduler.kt": "a86398dbcf6b900334cafe8e7dbf01f13e7a027f102fcccf36260501b2d4c780",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxEvent.kt": "ff67d98ab1d4f93c9f41554f6bf48da7ef4b311494104078019784aa4ee3b9f7",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxEventMessage.kt": "308f2df54a29fa5f3ba477b8122492d8ff4cb6249afeb77b080a4545089bf1cf",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxEventService.kt": "914207003b00b6e2da8ec8b18923f38008ce6f675abfce9fe846deed43f6c9cc",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxPublisher.kt": "0a3f50685e162ef1f1ec6aaea49dc5a4870aaa07d313bcbee3fe9369cb0d4677",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxPublisherProperties.kt": "b18f430e87615a839b538683de445a7e3bb2378d75d3cc891f67e1a0b86392f1",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxRetryPolicy.kt": "6d56c40c866b6bee31fd81a2d065efd392daa9905f83e82502e2e2d497fd56ce",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/OutboxStatus.kt": "e770f8f3864d25c8aefa384ad388f17905b6ef74d90abeded276164355c309b9",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/PaymentCompletePayload.kt": "a83edc98b4d8bf4924ffce2d1aaac6929cef2ec462f9d981d7b2ea8e4c9316c8",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/PaymentFailedPayload.kt": "563921131a6865264185a2a8a671f7f52252a3ff4cc830b2eebbaa09c4c051ff",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/PaymentRefundedPayload.kt": "c432639e63195ca6fb25b3a8ee25b6b7ce9fe06ccc218075b44cc2120e986465",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/ProductDeactivatedPayload.kt": "3966d9a0abffcac6c027e1f642e161273934bd278ec4cd224d3e5bceb7ea8f17",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/ProductRegisteredPayload.kt": "82288055e5783d5926194da900936c1df5047d6ea9613d0a260a0481a2279315",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/ProductStockUpdatedPayload.kt": "e9de6e0ea7cb0811946cd35cadf7cadac75994c35757c61c0250733dfa007cd1",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/ShippingCompletedPayload.kt": "cc8d9f726a02f29bc2242d5663f227cade98952cb0ee3918d78f6743cb3c5400",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/ShippingFailedPayload.kt": "cee402f35887ca6086b9f30592ec5d28827281dadfcedaa3365179e7ff00fda1",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/ShippingStartedPayload.kt": "cc99e8c53fef7ca3c414384f6f7b420538966794821ea5414a66a6bd229c4175",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/api/OutboxOperationsController.kt": "4a57f657096ecbb900b09154097751f519c0d8d47919a3f669cb7c2571a66f0c",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/api/response/OutboxFailedEventResponse.kt": "5b5c5a3dcbc4d98000ae049df448c0470a0b82de536a400914e8a5d37e2ced93",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/api/response/OutboxFailedEventsResponse.kt": "ca31075e561f8c57bc5eb10c2ca12799c6baf5928e05debad52b3954d00cd81d",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/api/response/OutboxRequeueResponse.kt": "55d489c00143b30e3134e7f5d77e9152e0442ccbb7ee4f301d41a50c67eb1236",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/metrics/EventfulBusinessMetrics.kt": "6f70d225b8081ece3f09ef4dcecccfe82ef647d4355b8ce9c278d2cb6dbab5f0",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/metrics/OutboxMetrics.kt": "c7f357dd40bbfeca81f1395ba6915753b4e224dfb6c1165000103863a11d4e7b",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/operations/OutboxOperationsService.kt": "38960d1b00d068223339355d534887a5af108708dfd8af33b4b1ec9d54ea848c",
+    "common-outbox/src/main/kotlin/com/eventfulcommerce/common/repository/OutboxEventRepository.kt": "b2347f8bac7d057fc90739e8678c7ce683aec6bc0067669220a8ed4248bf08fc",
+    "common-outbox/src/main/resources/db/migration/V10__outbox_retry_state.sql": "9be25e5fd4a481413d83af61e28f025a6a203b5808f127c9fed27838382d7ced",
+    "common-outbox/src/main/resources/db/migration/V11__outbox_requeue_audit.sql": "17f98d80baad2bcbade1af56d874a4f9d6c14f2a5b8b295c62d1189432c519ef",
+    "common-outbox/src/main/resources/db/migration/V12__outbox_sent_retention_index.sql": "66e0a4c8633e2b28e1160185f325e28fc686e606518545dc340e95026b48c38e",
+    "common-outbox/src/main/resources/db/migration/V13__outbox_processing_status.sql": "56e59b449570099419dee0b580241bdd9e4e34fbb346d30606af6d77144cc14c",
+    "common-outbox/src/test/kotlin/com/eventfulcommerce/common/OutboxCleanupSchedulerTest.kt": "547e987b9805605c16aaef716324e1df97c0b550cc62926b4fed52f80bb42a53",
+    "common-outbox/src/test/kotlin/com/eventfulcommerce/common/OutboxEventRepositoryPostgresIntegrationTest.kt": "83701b0f08672fa8784cb615022192fcad026abe5cbf540dfb36ea1a347a07c4",
+    "common-outbox/src/test/kotlin/com/eventfulcommerce/common/OutboxEventServiceTest.kt": "6afa834ce7c4b2e18b2a68637bc33f271d568c4e1c1dcb87a4b4bd420993787d",
+    "common-outbox/src/test/kotlin/com/eventfulcommerce/common/OutboxPublisherTest.kt": "0b59363f82e28d55365636d0fde5a62c20eacb25e97cd12470cd89ba641c5312",
+    "common-outbox/src/test/kotlin/com/eventfulcommerce/common/OutboxRetryPolicyTest.kt": "e49d138cf524cfe9740dffea23479da6e0833d3e3e94933a7d705a9a32216350",
+    "payment-service/build.gradle.kts": "7445746eb4d3d96ee6a5a067f05e25f01681f5486931ca45c087e90e172658e3",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/PaymentServiceApplication.kt": "515f14337a6d7c4da8e28894ec4c4ae0d10bdf56a345dc2713ba5eb3b9405a5e",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/config/KafkaConsumerConfig.kt": "7ca06e9729084093d1f7a6c98a7fd678bcbf827fc1556c5f2d237de5eba7dad0",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/config/OpenApiConfig.kt": "7d7a2083f73f7dcccf63fbcc59ff91e4b674137740c401063e7fb75f01d42659",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/controller/PaymentWebhookController.kt": "b63670bdac5f5e2c2a46a1e690c8f3a39684528c03914d783222af4acb8f8bd3",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/PaymentStatus.kt": "282b2987f6a20a63a1873328da9b2f5bbda80c41716288b0040e72445298608a",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/PaymentWebhookRequest.kt": "9c33f5eabbf123cf41dab7811df4ae8c4bf6af9435928dca29a62def84f2744c",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/entity/Payment.kt": "f2ab0ea07899e28197940fd990e3646f7fcf5c2b73fc153865b244c878d956ea",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefund.kt": "84ad8c68b97c2bc1fe668034daf1fa1f1840fec0202a430bc1f3585105e74e07",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/exception/GlobalExceptionHandler.kt": "14fe23f7a8441761fa1e5fccbdf35f58435652a2b72e427060b70cce98a3a3dd",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/message/OrderEventsConsumer.kt": "4b6446c4bd88dff0b94d14b33810a960e4f271f074041075f35a0e20304bfa26",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/repository/PaymentRefundRepository.kt": "f62703161f5dbb7afe1d99b9e0d3a53b55fdcc472548ee5d41637fd7dc862c04",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/repository/PaymentRepository.kt": "6d989ca02bef5a672676aa451f5b0a39f35adb87250e39fb52fd70ada4181e2e",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/service/PaymentService.kt": "3116330903c77d3796236bd1976f62696b6cd66ca3e888e197f33e9e353d6571",
+    "payment-service/src/main/kotlin/com/eventfulcommerce/payment/service/PaymentWebhookService.kt": "f8c3edd4baf61d4b32bf3c16a2c760e58ac579f4bc5711b9779c80281f35c004",
+    "payment-service/src/main/resources/application-dev.yml": "6963744b98e4e018d6eff0a1cfb78da0331b7856d150495035f2a6f3121dd4e3",
+    "payment-service/src/main/resources/application-docker.yml": "aacc7017b4b17bb8fbfa52023dccf034e07407475f2c60359b674c66b8a848fd",
+    "payment-service/src/main/resources/application-prod.yml": "fd9ce1e5108d1e06d66e8824c77ef283e3bd6f3fe6bf90f398092f5cf32257cc",
+    "payment-service/src/main/resources/application.yml": "c0a88d66589690ba26c064fb22cc9eeb3de5438c4fe54c7951c608a67edcd10a",
+    "payment-service/src/main/resources/db/migration/V1__payment_order_uniqueness.sql": "63219054658ad584fc8b69a55f32b29ef50069dc64319937233f119831af3389",
+    "payment-service/src/main/resources/db/migration/V2__payment_pending_cancellation.sql": "ca07b5b517390c7f2297bcb5432adc34cd4d68a3fef5ad117ad2af4ab3b97220",
+    "payment-service/src/main/resources/db/migration/V3__payment_concurrency_and_refund_bounds.sql": "b00de8f149d3c0f9c140d0869a92ddb9f7af3dc3a1474e5be558626e2eecbc80",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/domain/entity/PaymentRefundTest.kt": "0f01b8c0b664fab3a5dcb6ee98820fea13ff9918ab3d678ea844dbf5b1911d55",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentConcurrencyPostgresIntegrationTest.kt": "90e949ce5dfd1bf4f509d0eac7cb25f9f09177d5feacbb224312c2c478aead59",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentServiceTest.kt": "d62572b96ef167d09b38f16790c85bcd24041d8e0635b9b398e1a5f168042ea2",
+    "payment-service/src/test/kotlin/com/eventfulcommerce/payment/service/PaymentWebhookServiceTest.kt": "aa7d458ed3d3d378555925981a9cd68176017ce3efabcc975c309545e2f8a858",
+    "settlement-service/build.gradle.kts": "65cb18bfeb3d61ba9a72c3e861debde9aa2a089564e7c91ac5297050d301cd9d",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/SettlementServiceApplication.kt": "3018afc89a5ad9e299b24209e33b30c0684b4f74eedb1bf6507b8ac64e4df166",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/KafkaConsumerConfig.kt": "125906a6cfa67cf009bb49a4a29f7318cc2f430da70109f19d20aea468147cd7",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/OpenApiConfig.kt": "ce02f7e76d261a954baa2bd6df07a7956eb39327607773be47b2ac99ca16b943",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/RedissonConfig.kt": "785f2124649b656bec30e6338fb9a62d00857e57e9ed7d30e2c14d28f7dc9c20",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/SecurityConfig.kt": "6fd845c9c3f99fbcff3766857ce53ca6b2d1b48c24654ce73335113c77c0763e",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/SettlementBatchConfig.kt": "84f70e13ffcb6be71b2277907e14221356f888534f46500e34264330a4d2bbf0",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/config/SettlementConfig.kt": "979cb3b9c608b84c98ab974a5b03bf5df038fd04fa4d7c16a354a8173eb3c2d9",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/controller/SettlementController.kt": "91e17d1d637b682f29b1359ef207e6bc045aa574c2488213b887f04d7be47bd6",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/SettlementStatus.kt": "2422af8c0810e947815e9e9b644c70cc35f4c577759f00eb9bb7ca7e81a39deb",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/Settlement.kt": "03ff6a695b79130c1b6cd7ccc61751072bf32cc328c35c7c655067b44dc1e793",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/domain/entity/SettlementRefund.kt": "1480b4238a356bd4ca04b2b5db6f0f6ae426e85ae76c32d8305a6403992e1192",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/dto/SettlementDto.kt": "eeb36b4d0e26b7fcfa95d09e5d7cd81a201a8d9d1279efdbc4ce57403a41a72d",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/exception/GlobalExceptionHandler.kt": "aeeafe81bf9835f209d70e95a01841788d0e8f2435c253596a951fab6ad066d5",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/exception/SettlementNotFoundException.kt": "01c7d4c549f712619592fbcaa11fce0248e97751f0f3136a93106265e29131f0",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumer.kt": "d747af1c38bf27c124bfaa065ec69802caf846a321a16f8f161a162d5fe447ed",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRefundRepository.kt": "2c623ad272db3c9f97673b19e7c4bfb4f15cda20db73727f0b531929b4927176",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/repository/SettlementRepository.kt": "a90e3eb8ba6c6adbe074f29d689f78ea75a294f9f32b9bc503def98dc2ce35b0",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/scheduler/SettlementScheduler.kt": "03d31780a237869a949f21b85c81db6c1d08f05c4d149c5f97afa753a35341f3",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/service/SettlementPayExecutor.kt": "1171ec2e0cd13055a00138c09724672d8df04e3f095176754e8fb11a3ef2dda8",
+    "settlement-service/src/main/kotlin/com/eventfulcommerce/settlement/service/SettlementService.kt": "7dbabca0203ec62b833f4fa80f1ccb6565d224f136cd9efa5fbe0c93059bc2be",
+    "settlement-service/src/main/resources/application-dev.yml": "6963744b98e4e018d6eff0a1cfb78da0331b7856d150495035f2a6f3121dd4e3",
+    "settlement-service/src/main/resources/application-docker.yml": "83d63da4eafe15a97f53d1eb9f889a9d70dc2463950174441c0c21e49a45ed57",
+    "settlement-service/src/main/resources/application-prod.yml": "fd9ce1e5108d1e06d66e8824c77ef283e3bd6f3fe6bf90f398092f5cf32257cc",
+    "settlement-service/src/main/resources/application.yml": "430dada4de6ec9f9ddde06c5f6437535bd06aae6b5d76cd9073de8ade1e6cd40",
+    "settlement-service/src/main/resources/db/migration/V1__settlement_refund_idempotency.sql": "315f784b90ae5f4c3bf5e8e614b316cd28793304a0188e734bdee0007c2fee13",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/message/PaymentEventsConsumerTest.kt": "c723c0d9188e8b0e189b1faa7b74b87c26eb60b3b9781ce763f05404ec3c7be8",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementRefundPostgresIntegrationTest.kt": "f6d83a4695b30bf4bc1525068b21595483b680decabd7c644ffaaaa9ec5fc05b",
+    "settlement-service/src/test/kotlin/com/eventfulcommerce/settlement/service/SettlementServiceTest.kt": "6c5220619697c2fab80333d0f4af9d8c38ab60a0826a44e9b32a819044a14074"
+  },
+  "file_hash_manifest_sha256": "192d025e8cddd26e9849397da8f5cce465ba9424b717ffba5e82af570424b152",
+  "resolution_and_workflow_hashes": {
+    ".workflow/TASK.md": "345e63b73783b83b1a8ccf3fa00acf523077c19f64c95246544394c32acbb081",
+    ".workflow/HANDOFF.md": "906322442af3c8429cce5a0550bff3f840612552dcea8b83fb3c8223cab19dcb",
+    ".workflow/COMMERCE_REMEDIATION_PLAN.md": "de4453d46f0b28eb10e04660390bc17e7c76801bd4fc46346b6ebc981b2058be",
+    "reviews/EC-CORRECTNESS-RESTART-20261007-S2/RESOLUTION.md": "1132976b6ba8a6a3d92a17e68b3198fc98fa25d3e211e0eb35a4518985037759",
+    "reviews/EC-CORRECTNESS-RESTART-20261007-S2/resolution-build.log": "7f8853bd5c666889dda9980e3b4bbf8ca979232748f05614ffd117b214cfde20"
+  },
+  "running_containers_after_validation": [],
+  "local_compose_database_modified": false,
+  "committed": false,
+  "deployed": false,
+  "unexecuted_optional_integrations": [
+    "Kafka broker delivery/retry/DLT",
+    "external PG"
+  ],
+  "remaining_required_validation": []
+}

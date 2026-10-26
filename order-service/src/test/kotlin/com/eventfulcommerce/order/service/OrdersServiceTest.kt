@@ -35,6 +35,7 @@ class OrdersServiceTest {
     private lateinit var inventoryReservationService: InventoryReservationService
     private lateinit var idempotencyHandler: IdempotencyHandler
     private lateinit var orderCancelService: OrderCancelService
+    private lateinit var orderCancelExecutor: OrderCancelExecutor
     private lateinit var orderSagaService: OrderSagaService
     private lateinit var businessMetrics: EventfulBusinessMetrics
     private lateinit var objectMapper: ObjectMapper
@@ -50,6 +51,8 @@ class OrdersServiceTest {
         inventoryReservationService = mockk()
         idempotencyHandler = mockk(relaxed = true)
         orderCancelService = mockk(relaxed = true)
+        orderCancelExecutor = mockk()
+        every { orderCancelExecutor.executeInventoryCompensation(any(), any()) } returns true
         orderSagaService = mockk(relaxed = true)
         businessMetrics = mockk(relaxed = true)
         objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -82,6 +85,7 @@ class OrdersServiceTest {
             idempotencyHandler = idempotencyHandler,
             objectMapper = objectMapper,
             orderCancelService = orderCancelService,
+            orderCancelExecutor = orderCancelExecutor,
             orderSagaService = orderSagaService,
             businessMetrics = businessMetrics,
             commissionRate = 0.1,
@@ -251,7 +255,7 @@ class OrdersServiceTest {
             userId = order.userId
         )
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
         every {
             inventoryReservationService.commit(any<String>(), any<UUID>(), any<Int>())
         } returns InventoryReservationActionResult.APPLIED
@@ -289,7 +293,7 @@ class OrdersServiceTest {
             userId = order.userId
         )
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
         every {
             inventoryReservationService.commit(any<String>(), any<UUID>(), any<Int>())
         } returns InventoryReservationActionResult.NOT_FOUND
@@ -317,7 +321,7 @@ class OrdersServiceTest {
             userId = order.userId
         )
 
-        every { ordersRepository.findById(order.id) } returns Optional.of(order)
+        every { ordersRepository.findByIdForUpdate(order.id) } returns order
 
         ordersService.handlePaymentCompleted(paymentCompletedMessage)
 

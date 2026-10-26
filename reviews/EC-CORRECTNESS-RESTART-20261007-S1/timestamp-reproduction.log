@@ -1,0 +1,9 @@
+Workflow: workflow-independent-review
+Scope: isolated PostgreSQL 16, JDBC 42.7.4, existing compiled SettlementRefund.matches
+This reproduces the timestamp round-trip and product comparison, not a full Spring payment-to-settlement flow.
+first_payload.refundedAt=2026-10-07T12:34:56.123456789Z
+republished_payload.refundedAt=2026-10-07T12:34:56.123457Z
+receipt.matches(first_payload)=true
+receipt.matches(republished_payload)=false
+REV-001 reproduced: a DB-reloaded legitimate refund fails the compiled product matcher
+Isolated PostgreSQL container removed; no volumes or Compose services modified.

@@ -24,14 +24,14 @@ class OrderCancelServiceTest {
         every { lock.tryLock(10L, TimeUnit.SECONDS) } returns true
         every { lock.isHeldByCurrentThread } returns true
         every { lock.unlock() } just Runs
-        every { executor.execute(orderId, "full") } returns true
-        every { executor.executeSellerOrder(orderId, sellerOrderId, "partial") } returns true
+        every { executor.request(orderId, null, "full") } returns OrderCancellationOutcome.CANCELED
+        every { executor.request(orderId, sellerOrderId, "partial") } returns OrderCancellationOutcome.PENDING
 
         val service = OrderCancelService(executor, redisson)
 
         assertEquals(OrderCancellationOutcome.CANCELED, service.cancelForEvent(orderId, "full"))
         assertEquals(
-            OrderCancellationOutcome.CANCELED,
+            OrderCancellationOutcome.PENDING,
             service.cancelSellerOrderForEvent(orderId, sellerOrderId, "partial")
         )
 
@@ -51,6 +51,6 @@ class OrderCancelServiceTest {
         val outcome = OrderCancelService(executor, redisson).cancelForEvent(orderId, "payment failed")
 
         assertEquals(OrderCancellationOutcome.LOCK_UNAVAILABLE, outcome)
-        verify(exactly = 0) { executor.execute(any(), any()) }
+        verify(exactly = 0) { executor.request(any(), any(), any()) }
     }
 }

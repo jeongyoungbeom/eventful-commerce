@@ -49,3 +49,4 @@ scripts/results/
 ### Local Agent Instructions ###
 AGENTS.md
 .agents/
+.workflow/

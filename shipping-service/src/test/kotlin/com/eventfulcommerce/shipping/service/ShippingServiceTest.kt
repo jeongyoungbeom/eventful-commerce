@@ -55,24 +55,25 @@ class ShippingServiceTest {
     }
 
     @Test
-    fun `ORDER_CONFIRMED 이벤트는 판매자 주문별 배송을 생성하고 배송 시작 이벤트를 기록한다`() {
+    fun `ORDER_CONFIRMED는 준비 배송을 생성하고 출고 호출만 시작 이벤트를 한 번 기록한다`() {
         val payload = orderConfirmedPayload()
-        val shippingSlot = slot<Shipping>()
 
         every { processedEventRepository.insertIfAbsent(any()) } returns 1
-        every { shippingRepository.existsBySellerOrderId(payload.sellerOrders.single().sellerOrderId) } returns false
-        every { shippingRepository.save(capture(shippingSlot)) } answers {
-            firstArg<Shipping>().also { setIfUninitialized(it, "id", UUID.randomUUID()) }
-        }
-        every { shippingRepository.findById(any<UUID>()) } answers { Optional.of(shippingSlot.captured) }
+        every { shippingRepository.insertIfAbsent(any(), any(), any(), any(), any(), any()) } returns 1
+        val preparing = Shipping(payload.orderId, payload.sellerOrders.single().sellerOrderId, payload.userId)
+        setIfUninitialized(preparing, "id", UUID.randomUUID())
+        every { shippingRepository.findBySellerOrderIdForUpdate(any()) } returns preparing
+        every { shippingRepository.findByIdForUpdate(preparing.id) } returns preparing
+        every { shippingRepository.save(any<Shipping>()) } answers { firstArg() }
         every { outboxEventService.record(any<List<OutboxEvent>>()) } just Runs
 
         shippingService.handleOrderConfirmed(UUID.randomUUID(), objectMapper.writeValueAsString(payload))
 
-        assertEquals(payload.orderId, shippingSlot.captured.orderId)
-        assertEquals(payload.sellerOrders.single().sellerOrderId, shippingSlot.captured.sellerOrderId)
-        assertEquals(payload.userId, shippingSlot.captured.userId)
-        assertNotNull(shippingSlot.captured.trackingNumber)
+        assertEquals(ShippingStatus.PREPARING, preparing.status)
+        assertNotNull(preparing.trackingNumber)
+        verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+        shippingService.startShipping(preparing.id)
+        shippingService.startShipping(preparing.id)
         verify(exactly = 1) {
             outboxEventService.record(
                 match<List<OutboxEvent>> { events ->
@@ -85,7 +86,7 @@ class ShippingServiceTest {
                 }
             )
         }
-        verify(exactly = 1) { shippingCompletionWorker.completeAfterDelay(shippingSlot.captured.id) }
+        verify(exactly = 1) { shippingCompletionWorker.completeAfterDelay(preparing.id) }
     }
 
     @Test
@@ -103,7 +104,9 @@ class ShippingServiceTest {
     fun `이미 배송이 있는 판매자 주문은 중복 배송을 생성하지 않는다`() {
         val payload = orderConfirmedPayload()
         every { processedEventRepository.insertIfAbsent(any()) } returns 1
-        every { shippingRepository.existsBySellerOrderId(payload.sellerOrders.single().sellerOrderId) } returns true
+        every { shippingRepository.insertIfAbsent(any(), any(), any(), any(), any(), any()) } returns 0
+        every { shippingRepository.findBySellerOrderIdForUpdate(any()) } returns
+            Shipping(payload.orderId, payload.sellerOrders.single().sellerOrderId, payload.userId, ShippingStatus.CANCELED)
 
         shippingService.handleOrderConfirmed(UUID.randomUUID(), objectMapper.writeValueAsString(payload))
 

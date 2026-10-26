@@ -163,6 +163,7 @@ wait_shipping_completed() {
 
 require_cmd curl
 require_cmd jq
+require_payment_simulation
 
 TS=$(date +%s)
 SELLER_EMAIL="seller_${TS}@portfolio.test"
@@ -228,7 +229,7 @@ if ! wait_payment_record "$ORDER_ID" 60; then
 fi
 
 echo "[단계] 결제 성공 웹훅 호출"
-http_json POST "$GATEWAY_URL/api/payments/webhook" "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-$TS\",\"amount\":58000}"
+simulate_payment "{\"orderId\":\"$ORDER_ID\",\"result\":\"SUCCESS\",\"pgTxId\":\"PG-$TS\",\"amount\":58000}" "$USER_TOKEN"
 [[ "$RESPONSE_STATUS" == "200" ]] || { MESSAGE="결제 웹훅 실패: HTTP $RESPONSE_STATUS $RESPONSE_BODY"; exit 1; }
 echo "[성공] 결제 웹훅 처리 완료"
 

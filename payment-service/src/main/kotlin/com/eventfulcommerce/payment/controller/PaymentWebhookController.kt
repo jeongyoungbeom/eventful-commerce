@@ -1,32 +1,31 @@
 package com.eventfulcommerce.payment.controller
 
-import com.eventfulcommerce.payment.domain.PaymentWebhookRequest
 import com.eventfulcommerce.payment.service.PaymentWebhookService
+import com.eventfulcommerce.payment.webhook.PaymentWebhookVerifier
 import io.swagger.v3.oas.annotations.Operation
-import io.swagger.v3.oas.annotations.responses.ApiResponse
-import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.*
+import org.springframework.web.server.ResponseStatusException
 
 @RestController
 @RequestMapping("/payments")
-@Tag(name = "Payments", description = "결제 웹훅 수신 API")
+@Tag(name = "Payments", description = "검증된 PG 결제 결과 수신 API")
 class PaymentWebhookController(
-    private val paymentWebhookService: PaymentWebhookService
+    private val paymentWebhookService: PaymentWebhookService,
+    private val verifier: ObjectProvider<PaymentWebhookVerifier>
 ) {
-    @PostMapping("/webhook")
-    @Operation(summary = "결제 결과 웹훅", description = "PG 결제 결과를 수신합니다. SUCCESS면 PAYMENT_COMPLETED 이벤트를 발행하고 주문 확정/배송/정산으로 이어집니다. 실패 결과면 PAYMENT_FAILED 이벤트를 발행해 예약 재고를 해제하고 주문을 취소합니다.")
-    @ApiResponses(
-        ApiResponse(responseCode = "200", description = "웹훅 처리 완료"),
-        ApiResponse(responseCode = "400", description = "결제 정보 없음 또는 이미 처리된 상태")
-    )
-    fun webhook(@RequestBody request: PaymentWebhookRequest): ResponseEntity<String> {
-        paymentWebhookService.handle(request)
-        return ResponseEntity("Payment successful", HttpStatus.OK)
+    @PostMapping("/webhook", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    @Operation(summary = "PG 결제 결과 웹훅", description = "PG별 발신자·결제 결과 검증 후 처리합니다. 검증자가 구성되지 않으면 503으로 차단합니다.")
+    fun webhook(@RequestBody rawBody: ByteArray, @RequestHeader headers: HttpHeaders): ResponseEntity<String> {
+        val configuredVerifier = verifier.ifAvailable
+            ?: throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "PG 웹훅 검증자가 구성되지 않았습니다")
+        val verified = configuredVerifier.verify(rawBody, headers)
+        paymentWebhookService.handle(verified)
+        return ResponseEntity.ok("Payment webhook processed")
     }
 }

@@ -30,13 +30,13 @@ class SecurityConfig(
                     .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                     .requestMatchers(
                         "/api/auth/**",
-                        "/api/payments/webhook",
                         "/actuator/**",
                         "/swagger-ui/**",
                         "/swagger-ui.html",
                         "/v3/api-docs/**",
                         "/api-docs/**"
                     ).permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/*").permitAll()
                     .anyRequest().authenticated()
             }

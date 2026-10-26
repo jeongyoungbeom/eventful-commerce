@@ -24,7 +24,7 @@ dependencies {
 
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
 
-    testImplementation("org.springframework:spring-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.mockk:mockk:1.13.9")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

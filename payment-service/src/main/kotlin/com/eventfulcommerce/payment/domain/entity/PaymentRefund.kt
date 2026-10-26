@@ -2,6 +2,7 @@ package com.eventfulcommerce.payment.domain.entity
 
 import jakarta.persistence.*
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Entity
@@ -29,9 +30,12 @@ class PaymentRefund(
     @Column(nullable = false)
     val reason: String,
 
-    @Column(name = "refunded_at", nullable = false)
-    val refundedAt: Instant = Instant.now()
+    refundedAt: Instant = Instant.now()
 ) {
+    // 최초 발행과 DB 재조회 후 재발행이 같은 시각을 사용하도록 저장 정밀도에 맞춘다.
+    @Column(name = "refunded_at", nullable = false)
+    val refundedAt: Instant = refundedAt.truncatedTo(ChronoUnit.MICROS)
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID

@@ -1,0 +1,58 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.5/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :common-idempotency:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :common-idempotency:compileKotlin UP-TO-DATE
+> Task :common-idempotency:compileJava NO-SOURCE
+> Task :common-idempotency:processResources UP-TO-DATE
+> Task :common-idempotency:classes UP-TO-DATE
+> Task :common-idempotency:jar UP-TO-DATE
+> Task :common-outbox:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :common-outbox:compileKotlin UP-TO-DATE
+> Task :common-outbox:compileJava NO-SOURCE
+> Task :common-outbox:processResources UP-TO-DATE
+> Task :common-outbox:classes UP-TO-DATE
+> Task :common-outbox:jar UP-TO-DATE
+> Task :payment-service:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :payment-service:processResources UP-TO-DATE
+> Task :payment-service:processTestResources NO-SOURCE
+> Task :common-auth:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :common-auth:compileKotlin UP-TO-DATE
+> Task :common-auth:compileJava NO-SOURCE
+> Task :common-auth:processResources NO-SOURCE
+> Task :common-auth:classes UP-TO-DATE
+> Task :common-auth:jar UP-TO-DATE
+> Task :settlement-service:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :settlement-service:compileKotlin UP-TO-DATE
+> Task :settlement-service:compileJava NO-SOURCE
+> Task :settlement-service:processResources UP-TO-DATE
+> Task :settlement-service:classes UP-TO-DATE
+> Task :settlement-service:resolveMainClassName UP-TO-DATE
+> Task :settlement-service:bootJar UP-TO-DATE
+> Task :settlement-service:jar UP-TO-DATE
+> Task :settlement-service:assemble UP-TO-DATE
+> Task :settlement-service:processTestResources NO-SOURCE
+> Task :payment-service:compileKotlin
+> Task :payment-service:compileJava NO-SOURCE
+> Task :payment-service:classes UP-TO-DATE
+> Task :payment-service:resolveMainClassName
+> Task :payment-service:bootJar
+> Task :payment-service:jar
+> Task :payment-service:assemble
+> Task :settlement-service:compileTestKotlin UP-TO-DATE
+> Task :settlement-service:compileTestJava NO-SOURCE
+> Task :settlement-service:testClasses UP-TO-DATE
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+> Task :payment-service:compileTestKotlin
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+> Task :settlement-service:test
+> Task :payment-service:compileTestJava NO-SOURCE
+> Task :payment-service:testClasses UP-TO-DATE
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+> Task :payment-service:test
+> Task :payment-service:check
+> Task :payment-service:build
+> Task :settlement-service:check
+> Task :settlement-service:build
+
+BUILD SUCCESSFUL in 48s
+22 actionable tasks: 7 executed, 15 up-to-date

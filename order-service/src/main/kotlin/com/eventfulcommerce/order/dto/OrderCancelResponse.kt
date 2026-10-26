@@ -5,5 +5,6 @@ import java.util.UUID
 data class OrderCancelResponse(
     val success: Boolean,
     val orderId: UUID,
-    val message: String
+    val message: String,
+    val outcome: com.eventfulcommerce.order.service.OrderCancellationOutcome
 )

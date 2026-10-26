@@ -15,8 +15,9 @@ class PaymentEventsConsumer(
     @KafkaListener(topics = ["order-events"], groupId = "shipping-service")
     fun receive(value: String) {
         val readValue = objectMapper.readValue(value, OutboxEventMessage::class.java)
-        if (readValue.eventType != "ORDER_CONFIRMED") return
-
-        shippingService.handleOrderConfirmed(readValue.eventId, readValue.payload)
+        when (readValue.eventType) {
+            "ORDER_CONFIRMED" -> shippingService.handleOrderConfirmed(readValue.eventId, readValue.payload)
+            "SHIPPING_CANCELLATION_REQUESTED" -> shippingService.handleCancellationRequested(readValue.eventId, readValue.payload)
+        }
     }
 }

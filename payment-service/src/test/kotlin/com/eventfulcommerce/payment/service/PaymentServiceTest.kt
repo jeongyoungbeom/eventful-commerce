@@ -136,7 +136,7 @@ class PaymentServiceTest {
         )
         val message = orderCanceledMessage(eventId, payload)
 
-        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.findByOrderIdForUpdate(payment.orderId)).thenReturn(payment)
         whenever(
             paymentRefundRepository.findByPaymentIdAndSellerOrderId(
                 payment.id,
@@ -199,7 +199,7 @@ class PaymentServiceTest {
         )
         val message = orderCanceledMessage(eventId, payload)
 
-        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.findByOrderIdForUpdate(payment.orderId)).thenReturn(payment)
         whenever(paymentRefundRepository.findByPaymentIdAndSellerOrderId(any<UUID>(), any<UUID>())).thenReturn(null)
         whenever(paymentRefundRepository.save(any<PaymentRefund>())).thenAnswer {
             (it.arguments[0] as PaymentRefund).also { refund ->
@@ -242,7 +242,7 @@ class PaymentServiceTest {
             reason = payload.reason
         )
 
-        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.findByOrderIdForUpdate(payment.orderId)).thenReturn(payment)
         whenever(
             paymentRefundRepository.findByPaymentIdAndSellerOrderId(
                 payment.id,
@@ -254,7 +254,7 @@ class PaymentServiceTest {
         paymentService.handleOrderCanceled(message)
 
         assertEquals(0, payment.refundedAmount)
-        assertEquals(PaymentStatus.PAYMENT_PARTIALLY_REFUNDED, payment.status)
+        assertEquals(PaymentStatus.PAYMENT_COMPLETED, payment.status)
         verify(paymentRefundRepository, never()).save(any<PaymentRefund>())
         verify(outboxEventRepository, never()).saveAll(any<List<OutboxEvent>>())
     }
@@ -274,13 +274,13 @@ class PaymentServiceTest {
             refundAmount = 20_000
         )
 
-        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.findByOrderIdForUpdate(payment.orderId)).thenReturn(payment)
 
         paymentService.handleOrderCanceled(orderCanceledMessage(eventId, payload))
 
         assertEquals(PaymentStatus.PAYMENT_RESERVED, payment.status)
         assertEquals(true, payment.cancellationRequested)
-        assertEquals(payload.orderId, objectMapper.readValue(payment.pendingCancellationPayload, OrderCanceledPayload::class.java).orderId)
+        assertEquals(payload.orderId, objectMapper.readValue(payment.pendingCancellationPayload, Array<OrderCanceledPayload>::class.java).single().orderId)
         verify(idempotencyHandler).executeIdempotent(eq(eventId), any<() -> Unit>())
         verify(paymentRefundRepository, never()).save(any<PaymentRefund>())
         verify(paymentRepository).save(payment)
@@ -295,7 +295,7 @@ class PaymentServiceTest {
             userId = UUID.randomUUID(),
             refundAmount = 20_000
         )
-        whenever(paymentRepository.findByOrderId(payload.orderId)).thenReturn(null)
+        whenever(paymentRepository.findByOrderIdForUpdate(payload.orderId)).thenReturn(null)
 
         assertThrows(IllegalStateException::class.java) {
             paymentService.handleOrderCanceled(orderCanceledMessage(eventId, payload))
@@ -315,6 +315,7 @@ class PaymentServiceTest {
             status = PaymentStatus.PAYMENT_REFUNDED
         )
         setField(payment, "id", UUID.randomUUID())
+        payment.refundedAmount = payment.amount
         val payload = orderCanceledPayload(
             orderId = payment.orderId,
             userId = payment.userId,
@@ -329,7 +330,12 @@ class PaymentServiceTest {
             reason = "original cancellation"
         )
         setField(existingRefund, "id", UUID.randomUUID())
-        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.findByOrderIdForUpdate(payment.orderId)).thenReturn(payment)
+        whenever(
+            paymentRefundRepository.findByPaymentIdAndSellerOrderId(
+                payment.id, payload.canceledSellerOrders.single().sellerOrderId
+            )
+        ).thenReturn(existingRefund)
         whenever(
             paymentRefundRepository.findByPaymentIdAndSellerOrderIdIn(
                 payment.id,
@@ -350,7 +356,17 @@ class PaymentServiceTest {
 
         verify(outboxEventRepository).saveAll(
             argThat<List<OutboxEvent>> { events ->
-                objectMapper.readValue(events.single().payload, PaymentRefundedPayload::class.java).refundId == existingRefund.id
+                objectMapper.readValue(events.single().payload, PaymentRefundedPayload::class.java) ==
+                    PaymentRefundedPayload(
+                        refundId = existingRefund.id,
+                        paymentId = payment.id,
+                        orderId = existingRefund.orderId,
+                        sellerOrderId = existingRefund.sellerOrderId,
+                        sellerId = existingRefund.sellerId,
+                        amount = existingRefund.amount,
+                        reason = existingRefund.reason,
+                        refundedAt = existingRefund.refundedAt
+                    )
             }
         )
     }
@@ -468,13 +484,13 @@ class PaymentServiceTest {
             status = PaymentStatus.PAYMENT_RESERVED
         )
         val payload = orderCanceledPayload(payment.orderId, payment.userId, 20_000)
-        whenever(paymentRepository.findByOrderId(payment.orderId)).thenReturn(payment)
+        whenever(paymentRepository.findByOrderIdForUpdate(payment.orderId)).thenReturn(payment)
         whenever(paymentRepository.save(any<Payment>())).thenAnswer { it.arguments[0] as Payment }
 
         paymentService.handleOrderCanceled(orderCanceledMessage(UUID.randomUUID(), payload))
 
         assertEquals(true, payment.cancellationRequested)
-        assertEquals(payload.orderId, objectMapper.readValue(payment.pendingCancellationPayload, OrderCanceledPayload::class.java).orderId)
+        assertEquals(payload.orderId, objectMapper.readValue(payment.pendingCancellationPayload, Array<OrderCanceledPayload>::class.java).single().orderId)
         verify(paymentRefundRepository, never()).save(any<PaymentRefund>())
         verify(outboxEventRepository, never()).saveAll(any<List<OutboxEvent>>())
     }

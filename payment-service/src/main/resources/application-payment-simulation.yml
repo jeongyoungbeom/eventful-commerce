@@ -1,0 +1,4 @@
+# 로컬 검증에서만 SPRING_PROFILES_ACTIVE=dev,payment-simulation 등으로 명시한다.
+payment:
+  simulation:
+    enabled: true

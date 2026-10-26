@@ -50,7 +50,7 @@ class PaymentEventsConsumer(
                 }
                 "PAYMENT_REFUNDED" -> {
                     val payload = objectMapper.readValue(event["payload"].asText(), PaymentRefundedPayload::class.java)
-                    settlementService.applyRefund(payload.sellerOrderId, payload.amount)
+                    settlementService.applyRefund(payload)
                     logger.info { "정산 환불 차감 완료: refundId=${payload.refundId}" }
                 }
             }

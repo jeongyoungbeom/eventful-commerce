@@ -1,11 +1,9 @@
 package com.eventfulcommerce.shipping.service
 
 import com.eventfulcommerce.common.*
-import com.eventfulcommerce.shipping.domain.Shipping
 import com.eventfulcommerce.shipping.domain.ShippingStatus
 import com.eventfulcommerce.shipping.repository.ShippingRepository
 import com.fasterxml.jackson.databind.ObjectMapper
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionSynchronization
@@ -13,8 +11,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Instant
 import java.util.*
 import kotlin.random.Random
-
-private val logger = KotlinLogging.logger {}
 
 @Service
 class ShippingService(
@@ -25,70 +21,64 @@ class ShippingService(
     private val shippingCompletionWorker: ShippingCompletionWorker
 ) {
 
-    /**
-     * ORDER_CONFIRMED 이벤트 처리
-     */
-    @Transactional
+    @Transactional(rollbackFor = [Exception::class])
     fun handleOrderConfirmed(eventId: UUID, payloadJson: String) {
         idempotencyHandler.executeIdempotent(eventId) {
             val payload = objectMapper.readValue(payloadJson, OrderConfirmedPayload::class.java)
-
-            payload.sellerOrders.forEach { sellerOrder ->
-                if (shippingRepository.existsBySellerOrderId(sellerOrder.sellerOrderId)) {
-                    logger.warn { "이미 배송이 생성됨: sellerOrderId=${sellerOrder.sellerOrderId}" }
-                    return@forEach
-                }
-
-                val trackingNumber = generateTrackingNumber()
-                val shipping = Shipping(
-                    orderId = payload.orderId,
-                    sellerOrderId = sellerOrder.sellerOrderId,
-                    userId = payload.userId,
-                    status = ShippingStatus.PREPARING,
-                    trackingNumber = trackingNumber
-                )
-                shippingRepository.save(shipping)
-
-                logger.info { "배송 생성: orderId=${payload.orderId}, sellerOrderId=${sellerOrder.sellerOrderId}, trackingNumber=$trackingNumber" }
-                startShipping(shipping.id)
-                scheduleCompletionAfterCommit(shipping.id)
+            payload.sellerOrders.sortedBy { it.sellerOrderId }.forEach { seller ->
+                val inserted = shippingRepository.insertIfAbsent(UUID.randomUUID(), payload.orderId,
+                    seller.sellerOrderId, payload.userId, ShippingStatus.PREPARING.name, Instant.now())
+                val shipping = requireNotNull(shippingRepository.findBySellerOrderIdForUpdate(seller.sellerOrderId))
+                check(shipping.orderId == payload.orderId && shipping.userId == payload.userId)
+                if (inserted == 1) shipping.trackingNumber = generateTrackingNumber()
+                // CANCELED 행은 확정보다 먼저 도착한 취소의 영속 기록이기도 하다.
             }
         }
     }
 
-    /**
-     * 배송 시작
-     */
-    @Transactional
-    fun startShipping(shippingId: UUID) {
-        val shipping = shippingRepository.findById(shippingId).orElse(null)
-        if (shipping == null) {
-            logger.warn { "배송을 찾을 수 없음: shippingId=$shippingId" }
-            return
+    @Transactional(rollbackFor = [Exception::class])
+    fun handleCancellationRequested(eventId: UUID, payloadJson: String) {
+        idempotencyHandler.executeIdempotent(eventId) {
+            val payload = objectMapper.readValue(payloadJson, ShippingCancellationRequestedPayload::class.java)
+            shippingRepository.insertIfAbsent(UUID.randomUUID(), payload.orderId, payload.sellerOrderId,
+                payload.userId, ShippingStatus.CANCELED.name, Instant.now())
+            val shipping = requireNotNull(shippingRepository.findBySellerOrderIdForUpdate(payload.sellerOrderId))
+            check(shipping.orderId == payload.orderId && shipping.userId == payload.userId)
+            val priorRequest = shipping.cancellationRequestId
+            check(priorRequest == null || priorRequest == payload.requestId) { "Conflicting cancellation request" }
+            if (priorRequest == null) {
+                val approved = shipping.shippedAt == null && shipping.status in setOf(
+                    ShippingStatus.PREPARING, ShippingStatus.CANCELED, ShippingStatus.FAILED)
+                shipping.cancellationRequestId = payload.requestId
+                shipping.cancellationApproved = approved
+                if (approved) shipping.status = ShippingStatus.CANCELED
+            }
+            outboxEventService.record(listOf(OutboxEvent(
+                aggregateType = "SHIPPING", aggregateId = payload.orderId,
+                eventType = "SHIPPING_CANCELLATION_DECIDED",
+                payload = objectMapper.writeValueAsString(ShippingCancellationDecidedPayload(
+                    payload.requestId, payload.orderId, payload.sellerOrderId, payload.userId,
+                    requireNotNull(shipping.cancellationApproved))),
+                status = OutboxStatus.PENDING
+            )))
         }
+    }
 
-        // 상태 변경
+    @Transactional(rollbackFor = [Exception::class])
+    fun startShipping(shippingId: UUID) {
+        val shipping = shippingRepository.findByIdForUpdate(shippingId) ?: return
+        if (shipping.status != ShippingStatus.PREPARING) return
         shipping.status = ShippingStatus.STARTED
         shipping.shippedAt = Instant.now()
         shippingRepository.save(shipping)
-
-        // SHIPPING_STARTED 이벤트 발행
-        val payload = ShippingStartedPayload(
-            orderId = shipping.orderId,
-            userId = shipping.userId,
-            trackingNumber = shipping.trackingNumber ?: ""
-        )
-
-        val outboxEvent = OutboxEvent(
-            aggregateType = ShippingStatus.STARTED.toString(),
-            aggregateId = shipping.id,
+        outboxEventService.record(listOf(OutboxEvent(
+            aggregateType = ShippingStatus.STARTED.name, aggregateId = shipping.id,
             eventType = "SHIPPING_STARTED",
-            payload = objectMapper.writeValueAsString(payload),
+            payload = objectMapper.writeValueAsString(ShippingStartedPayload(
+                shipping.orderId, shipping.userId, shipping.trackingNumber ?: "")),
             status = OutboxStatus.PENDING
-        )
-        outboxEventService.record(listOf(outboxEvent))
-
-        logger.info { "🚚 배송 시작: orderId=${shipping.orderId}, trackingNumber=${shipping.trackingNumber}" }
+        )))
+        scheduleCompletionAfterCommit(shipping.id)
     }
 
     private fun scheduleCompletionAfterCommit(shippingId: UUID) {
