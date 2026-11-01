@@ -1,5 +1,7 @@
 package com.eventfulcommerce.product.dto
 
+import com.eventfulcommerce.common.SalesType
+import com.eventfulcommerce.common.InventorySource
 import com.eventfulcommerce.product.domain.ProductCategory
 import com.eventfulcommerce.product.domain.ProductLabel
 import com.eventfulcommerce.product.domain.ProductStatus
@@ -74,7 +76,10 @@ data class ProductResponse(
     val imageUrls: List<String>,
     val status: ProductStatus,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    val salesType: SalesType = SalesType.MARKETPLACE,
+    val skuId: UUID = productId,
+    val inventorySource: InventorySource = salesType.inventorySource
 ) {
     companion object {
         fun from(product: Product) = ProductResponse(
@@ -89,7 +94,8 @@ data class ProductResponse(
             imageUrls = product.imageUrls.toList(),
             status = product.status,
             createdAt = product.createdAt,
-            updatedAt = product.updatedAt
+            updatedAt = product.updatedAt,
+            salesType = product.salesType
         )
     }
 }

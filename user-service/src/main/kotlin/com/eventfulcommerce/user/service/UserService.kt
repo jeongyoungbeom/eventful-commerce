@@ -11,6 +11,11 @@ import java.util.UUID
 class UserService(
     private val userRepository: UserRepository
 ) {
+    fun findByIdForUpdate(id: UUID): User = userRepository.findByIdForUpdate(id)
+        ?: throw UserNotFoundException(id.toString())
+
+    fun findByEmailForUpdate(email: String): User? = userRepository.findByEmailForUpdate(email)
+
     
     /**
      * User 조회 (ID로)

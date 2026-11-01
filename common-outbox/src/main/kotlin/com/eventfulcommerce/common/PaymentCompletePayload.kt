@@ -18,5 +18,9 @@ data class PaymentCompletedSellerPayload(
     val paymentAmount: Long,
     val commissionRate: Double,
     val commissionAmount: Long,
-    val settlementAmount: Long
-)
+    val settlementAmount: Long,
+    val salesType: SalesType = SalesType.MARKETPLACE,
+    val items: List<OrderReservedItemPayload> = emptyList()
+) {
+    init { salesType.validateSeller(sellerId) }
+}

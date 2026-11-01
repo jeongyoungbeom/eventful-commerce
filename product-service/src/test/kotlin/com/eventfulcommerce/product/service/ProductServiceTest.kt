@@ -7,6 +7,8 @@ import com.eventfulcommerce.common.InventoryStockAdjustedPayload
 import com.eventfulcommerce.common.OutboxStatus
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
+import com.eventfulcommerce.common.ProductUpdatedPayload
+import com.eventfulcommerce.product.dto.UpdateProductRequest
 import com.eventfulcommerce.common.ProductStockUpdatedPayload
 import com.eventfulcommerce.product.domain.ProductCategory
 import com.eventfulcommerce.product.domain.ProductLabel
@@ -27,7 +29,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.util.Optional
 import java.util.UUID
 
 class ProductServiceTest {
@@ -53,7 +54,8 @@ class ProductServiceTest {
             productRepository = productRepository,
             outboxEventService = outboxEventService,
             objectMapper = objectMapper,
-            imageStorageService = imageStorageService
+            imageStorageService = imageStorageService,
+            officialSellerRepository = mockk()
         )
     }
 
@@ -159,7 +161,7 @@ class ProductServiceTest {
     fun `상품 비활성화는 PRODUCT_DEACTIVATED 아웃박스 이벤트를 기록한다`() {
         val sellerId = UUID.randomUUID()
         val product = productFixture(sellerId = sellerId)
-        every { productRepository.findById(product.id) } returns Optional.of(product)
+        every { productRepository.findByIdForUpdate(product.id) } returns product
 
         productService.deactivateProduct(product.id, sellerId)
 
@@ -190,6 +192,21 @@ class ProductServiceTest {
         }
 
         verify(exactly = 0) { outboxEventService.record(any<List<OutboxEvent>>()) }
+    }
+
+    @Test
+    fun `상품 수정은 최신 정보와 순번을 Outbox에 기록한다`() {
+        val product = productFixture(UUID.randomUUID())
+        every { productRepository.findByIdForUpdate(product.id) } returns product
+        val response = productService.updateProduct(product.id,
+            UpdateProductRequest("새 상품", "새 설명", 20_000, ProductCategory.FLOWERS), product.sellerId, null)
+        assertEquals(20_000L, response.price)
+        verify { outboxEventService.record(match<List<OutboxEvent>> { events ->
+            events.single().eventType == "PRODUCT_UPDATED" &&
+                objectMapper.readValue<ProductUpdatedPayload>(events.single().payload).let {
+                    it.name == "새 상품" && it.price == 20_000L && it.informationVersion == 1L
+                }
+        }) }
     }
 
     private fun productFixture(sellerId: UUID, stock: Int = 10): Product {

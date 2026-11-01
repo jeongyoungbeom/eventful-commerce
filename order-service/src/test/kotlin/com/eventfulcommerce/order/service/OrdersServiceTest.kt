@@ -44,6 +44,7 @@ class OrdersServiceTest {
     @BeforeEach
     fun setUp() {
         ordersRepository = mockk()
+        every { ordersRepository.findById(any()) } returns Optional.empty()
         orderRequestIdempotencyRepository = mockk()
         sellerOrderRepository = mockk(relaxed = true)
         productReadModelRepository = mockk()
@@ -93,6 +94,28 @@ class OrdersServiceTest {
         )
     }
 
+    @Test fun `직매입은 예약하지 않고 혼합 요청의 입점 snapshot을 유지한다`() {
+        val direct = ProductReadModel(UUID.randomUUID(), SalesType.OFFICIAL_SELLER_ID, "공식몰", 9_999, 100,
+            "FLOWERS", salesType = SalesType.DIRECT_PURCHASE)
+        val normal = productReadModel(UUID.randomUUID(), UUID.randomUUID(), price = 10_000)
+        every { productReadModelRepository.findById(direct.productId) } returns Optional.of(direct)
+        every { productReadModelRepository.findById(normal.productId) } returns Optional.of(normal)
+        every<UUID?> { inventoryReservationService.reserve(normal.productId.toString(), any(), 1, any(), any()) } returns UUID.randomUUID()
+        val response = ordersService.orders(OrdersRequest(listOf(OrderItemRequest(direct.productId, 1),
+            OrderItemRequest(normal.productId, 1))), UUID.randomUUID(), "s1-mixed")
+        assertEquals("DIRECT_PURCHASE_NOT_READY", response.failedItems.single().reason)
+        assertEquals(10_000L, response.totalPaymentAmount)
+        val seller = response.sellerOrders.single()
+        assertEquals(SalesType.MARKETPLACE, seller.salesType)
+        assertEquals(InventorySource.SELLER_REDIS, seller.inventorySource)
+        assertEquals(normal.productId, seller.items.single().skuId)
+        assertEquals(0L, seller.items.single().deliveryFeeAllocation)
+        verify(exactly = 0) { inventoryReservationService.reserve(direct.productId.toString(), any(), any(), any(), any()) }
+        val onlyDirect = ordersService.orders(OrdersRequest(listOf(OrderItemRequest(direct.productId, 1))), UUID.randomUUID(), "s1-direct")
+        assertNull(onlyDirect.orderId)
+        assertEquals(OrdersStatus.ORDER_FAILED, onlyDirect.status)
+    }
+
     @Test
     fun `재고 예약이 성공하면 주문과 아웃박스 이벤트를 생성한다`() {
         val userId = UUID.randomUUID()
@@ -135,6 +158,28 @@ class OrdersServiceTest {
             )
         }
         verify(exactly = 0) { ordersRepository.delete(any<Orders>()) }
+    }
+
+    @Test
+    fun `가격 변경 이후 새 주문은 새 단가를 쓰고 기존 주문 스냅샷은 유지한다`() {
+        val product = productReadModel(UUID.randomUUID(), UUID.randomUUID(), price = 10_000)
+        every { productReadModelRepository.findById(product.productId) } returns Optional.of(product)
+        every<UUID?> { inventoryReservationService.reserve(any(), any(), any(), any(), any()) } returns UUID.randomUUID()
+        val request = OrdersRequest(items = listOf(OrderItemRequest(product.productId, 2)))
+        val before = ordersService.orders(request, UUID.randomUUID(), "before-price-change")
+        val processed = mockk<com.eventfulcommerce.common.repository.ProcessedEventRepository>()
+        every { processed.insertIfAbsent(any()) } returns 1
+        every { productReadModelRepository.findByIdForUpdate(product.productId) } returns product
+        com.eventfulcommerce.order.message.ProductEventsConsumer(productReadModelRepository, inventoryReservationService,
+            IdempotencyHandler(processed), objectMapper).consume(objectMapper.writeValueAsString(OutboxEventMessage(
+                UUID.randomUUID(), "PRODUCT", product.productId, "PRODUCT_UPDATED", Instant.now(),
+                objectMapper.writeValueAsString(ProductUpdatedPayload(product.productId, product.sellerId,
+                    "변경된 상품", 20_000, "FLOWERS", 1)))))
+        val after = ordersService.orders(request, UUID.randomUUID(), "after-price-change")
+        assertEquals(20_000L, before.totalPaymentAmount)
+        assertEquals(40_000L, after.totalPaymentAmount)
+        assertEquals(10_000L, before.sellerOrders.single().items.single().unitPrice)
+        assertEquals(20_000L, after.sellerOrders.single().items.single().unitPrice)
     }
 
     @Test

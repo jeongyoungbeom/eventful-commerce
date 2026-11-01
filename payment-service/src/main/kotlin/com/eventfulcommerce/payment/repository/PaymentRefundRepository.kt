@@ -5,6 +5,8 @@ import org.springframework.data.jpa.repository.JpaRepository
 import java.util.UUID
 
 interface PaymentRefundRepository : JpaRepository<PaymentRefund, UUID> {
+    fun findByPaymentIdAndRefundKey(paymentId: UUID, refundKey: UUID): PaymentRefund?
+
     fun findByPaymentIdAndSellerOrderId(paymentId: UUID, sellerOrderId: UUID): PaymentRefund?
 
     fun findByPaymentIdAndSellerOrderIdIn(

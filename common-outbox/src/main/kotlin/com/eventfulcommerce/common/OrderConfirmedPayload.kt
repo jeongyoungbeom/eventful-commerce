@@ -14,5 +14,8 @@ data class OrderConfirmedPayload(
 data class OrderConfirmedSellerPayload(
     val sellerOrderId: UUID,
     val sellerId: UUID,
-    val paymentAmount: Long
-)
+    val paymentAmount: Long,
+    val salesType: SalesType = SalesType.MARKETPLACE
+) {
+    init { salesType.validateSeller(sellerId) }
+}

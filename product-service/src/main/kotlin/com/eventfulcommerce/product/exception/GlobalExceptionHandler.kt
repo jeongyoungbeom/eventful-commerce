@@ -24,6 +24,10 @@ class GlobalExceptionHandler {
         )
     }
 
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException::class)
+    fun handleAccessDenied(ex: org.springframework.security.access.AccessDeniedException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse("FORBIDDEN", "관리자 권한이 필요합니다"))
+
     @ExceptionHandler(ProductOwnershipException::class)
     fun handleForbidden(ex: ProductOwnershipException): ResponseEntity<ErrorResponse> {
         logger.warn { "상품 권한 없음: ${ex.message}" }

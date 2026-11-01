@@ -5,6 +5,7 @@
 # 예시:   ./pull-and-restart-one.sh product-service
 
 set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
 DOCKER_USERNAME="jybeomss1"
 
@@ -17,6 +18,7 @@ VALID_SERVICES=(
     "user-service"
     "product-service"
     "settlement-service"
+    "inventory-service"
 )
 
 usage() {
@@ -71,11 +73,9 @@ NEW_IMAGE_ID=$(docker inspect --format='{{.Id}}' "$IMAGE")
 echo "✅ Pull 완료"
 echo ""
 
-# 서비스에 연관된 모든 컨테이너 제거 (이름이 다른 오래된 컨테이너 포함)
+# 현재 Compose 프로젝트의 해당 서비스만 교체한다.
 echo "🔄 재시작 중: ${SERVICE}..."
-docker ps -a --filter "label=com.docker.compose.service=${SERVICE}" --format "{{.ID}}" \
-    | xargs -r docker rm -f
-docker-compose up -d --no-deps "$SERVICE"
+docker compose up -d --no-deps --no-build --force-recreate "$SERVICE"
 echo "✅ 재시작 완료"
 echo ""
 
@@ -88,9 +88,9 @@ fi
 
 # 컨테이너 상태 확인
 echo "📊 컨테이너 상태:"
-docker-compose ps "$SERVICE"
+docker compose ps "$SERVICE"
 echo ""
 
 echo "=========================================="
-echo "✅ 완료! 로그 확인: docker-compose logs -f ${SERVICE}"
+echo "✅ 완료! 로그 확인: docker compose logs -f ${SERVICE}"
 echo "=========================================="

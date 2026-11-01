@@ -39,6 +39,7 @@ class OrderCancelExecutor(
             ?: return OrderCancellationOutcome.ALREADY_CANCELED
         val targets = order.sellerOrders.filter { sellerOrderId == null || it.id == sellerOrderId }
         if (targets.isEmpty()) return OrderCancellationOutcome.REJECTED
+        require(targets.all { it.salesType == SalesType.MARKETPLACE }) { "직매입은 재고 취소 절차가 필요합니다" }
         val immediate = targets.filter { it.status == SellerOrderStatus.RESERVED }
         if (immediate.isNotEmpty()) cancelAndRecord(order, immediate, reason)
         targets.filter { it.status == SellerOrderStatus.CONFIRMED }.forEach { seller ->
@@ -122,6 +123,7 @@ class OrderCancelExecutor(
     @Transactional(rollbackFor = [Exception::class])
     fun executeExpired(orderId: UUID): Boolean {
         val order = ordersRepository.findByIdForUpdate(orderId) ?: return false
+        if (order.mixedOrder) return false
         // 후보 조회 이후 상태나 만료 시각이 바뀔 수 있으므로 행 잠금 안에서 다시 판단한다.
         if (order.status !in listOf(OrdersStatus.ORDER_RESERVED, OrdersStatus.ORDER_PARTIALLY_CANCELED)) return false
         val expiresAt = order.expiresAt ?: return false
@@ -179,6 +181,7 @@ class OrderCancelExecutor(
                         }
                         recordInventoryStockAdjusted(orderId, item, "RESTOCKED")
                     }
+                    OrderItemStatus.CANCELLATION_PENDING -> error("진행 중인 혼합 취소는 전용 복구가 필요합니다")
                     OrderItemStatus.CANCELED -> Unit
                 }
             }
@@ -196,6 +199,7 @@ class OrderCancelExecutor(
                 OrderCanceledSellerPayload(
                     sellerOrderId = sellerOrder.id,
                     sellerId = sellerOrder.sellerId,
+                    salesType = sellerOrder.salesType,
                     refundAmount = sellerOrder.paymentAmount,
                     items = sellerOrder.items.map {
                         OrderCanceledItemPayload(

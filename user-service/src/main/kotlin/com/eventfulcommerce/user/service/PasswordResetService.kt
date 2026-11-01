@@ -1,5 +1,6 @@
 package com.eventfulcommerce.user.service
 
+import com.eventfulcommerce.common.auth.UserRole
 import com.eventfulcommerce.user.exception.InvalidTokenException
 import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.servlet.http.HttpServletRequest
@@ -18,7 +19,8 @@ class PasswordResetService(
     private val emailService: EmailService,
     private val redisTemplate: RedisTemplate<String, String>,
     private val passwordEncoder: PasswordEncoder,
-    private val auditLogService: AuditLogService
+    private val auditLogService: AuditLogService,
+    private val refreshTokenService: RefreshTokenService
 ) {
     
     companion object {
@@ -65,7 +67,10 @@ class PasswordResetService(
         val userId = validateResetToken(token)
         
         // User 조회
-        val user = userService.findById(userId)
+        val user = userService.findByIdForUpdate(userId)
+        if (validateResetToken(token) != userId) throw InvalidTokenException()
+        // 같은 계정의 로그인과 직렬화하고 Redis 폐기 실패 시 DB 변경도 롤백한다.
+        refreshTokenService.deleteRefreshToken(userId, UserRole.USER)
         
         // 비밀번호 변경
         user.password = passwordEncoder.encode(newPassword)

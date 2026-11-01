@@ -2,7 +2,7 @@
 
 Plan ID: EC-INVENTORY-EXPANSION-20261020
 작성일: 2026-10-20 (Asia/Seoul)
-상태: 사용자 합의에 따른 설계 기준 / 제품 구현·신규 테스트 미착수
+상태: 사용자 합의에 따른 설계 기준 / S1~S8 구현·필수 검증·독립 리뷰·필요한 반영 완료
 대상: /home/jybeomss/sideProject
 
 ## 1. 목표와 관련 문서
@@ -12,6 +12,7 @@ Plan ID: EC-INVENTORY-EXPANSION-20261020
 사용자는 재고 서비스 API를 이용하는 **B 경로**, 품절 품목을 제외하는 **② 상품별 부분 성공**, 아래 초기 운영 범위와 로컬 전체 플로우 검증을 승인했다. 이 문서는 그 합의를 구현 가능한 기준으로 정리한다. API 이름·상태 enum·물리 테이블명은 해당 단계에서 기존 코드와 대조해 확정한다.
 
 - 개발 순서와 완료 조건: [단계별 계획](../.workflow/INVENTORY_EXPANSION_PLAN.md)
+- S1 구현 계약과 후속 API: [판매·재고 연동 계약](inventory-integration-contract.md)
 - 지속할 판단: [설계 결정 D-011~D-019](../.workflow/DECISIONS.md)
 - 기존 보완 이력: [기존 1~6단계 계획](../.workflow/COMMERCE_REMEDIATION_PLAN.md)
 - 결제 테스트 경계: [웹훅 계약](payment-webhook-contract.md)
@@ -82,7 +83,7 @@ Plan ID: EC-INVENTORY-EXPANSION-20261020
 | Warehouse | 고유 ID·코드·이름·주소·운영 상태·신규 예약 허용 여부·선택 우선순위 |
 | Sku | 판매 상품과의 1:1 연결·공급사/브랜드 참조. 판매자 상품과 직매입 항목은 구분한다. |
 | Lot | SKU·로트 식별·사용기한·품질 상태·입고 참조. 사용기한 변경 이력을 남긴다. |
-| StockBalance | SKU × 창고 × 로트별 보유·예약·할당·판매불가 수량과 동시성 제어 정보 |
+| StockBalance | SKU × 창고 × 로트별 보유·예약·할당·판매불가·이동 확보 수량과 동시성 제어 정보 |
 | Reservation / AllocationLine | 주문·주문 품목·창고·요청 수량·로트별 확보 수량·상태·만료 시각·요청 내용 |
 | Supplier / PurchaseOrder | 공급사·발주 품목·발주 수량·매입 단가·잔여 입고 수량 |
 | InboundReceipt | 실제 도착 수량·정상/불량/검수 중 구분·로트·입고 확정 내용 |
@@ -100,9 +101,10 @@ Plan ID: EC-INVENTORY-EXPANSION-20261020
 - reserved: 결제 전 주문이 확보한 수량.
 - allocated: 결제 후 출고를 위해 확보한 수량. 피킹·포장 중에도 포함한다.
 - blocked: 검수 중·불량·기타 사유로 판매할 수 없는 수량. reserved/allocated와 중복 집계하지 않는다.
-- 로트의 산술 가용량: onHand - reserved - allocated - blocked.
+- transferHeld: 창고 이동 출발 전 확보한 수량. 고객 reserved/allocated와 분리한다.
+- 로트의 산술 가용량: onHand - reserved - allocated - blocked - transferHeld.
 - 실제 신규 판매 가능량: 사용기한·품질·창고 운영 조건을 통과한 로트의 가용량 합계.
-- 각 수량은 음수가 아니며 reserved + allocated + blocked <= onHand다. 수량 계산과 합산의 오버플로도 거부한다.
+- 각 수량은 음수가 아니며 reserved + allocated + blocked + transferHeld <= onHand다. 수량 계산과 합산의 오버플로도 거부한다.
 
 사용기한이 지난 로트는 배치 실행 여부와 무관하게 신규 예약·출고에서 제외한다. 예약 뒤 사용기한/품질 조건이 바뀌면 할당·출고 전에 재검사하고, 다른 유효 로트의 확보 또는 출고 중단·보상으로 처리한다. 만료 로트를 제외하기 위해 기존 예약·할당 수량을 무조건 0으로 지우지 않는다.
 
@@ -209,3 +211,9 @@ S1에서 이벤트 버전/필드, 공식 판매 주체 발급, 내부·관리자
 - [올리브영 인벤토리 파이프라인, 2026-07-01](https://oliveyoung.tech/2026-07-01/inventory-pipeline/): 재고 이벤트·기초재고·사용처별 데이터 제공에 관한 공개 사례.
 
 참고 자료는 업무 이해를 위한 근거다. PostgreSQL·B 경로·② 정책과 위 단계는 이 프로젝트의 선택이며 올리브영의 실제 내부 구현 전체를 복제하거나 보증하는 설명이 아니다.
+
+S7 이동 API·수량/복구·검증 계약은 [창고 이동 가이드](warehouse-transfers-s7.md)를 따른다.
+
+S8 실사 기준·버전 무효화·원장 대사·운영 화면은 [S8 운영 가이드](stock-counts-admin-s8.md)를 따른다.
+
+2026-10-28 S8 실사 수량 입력의 Major1건을 반영하고 실제 HTTP/PostgreSQL 신규16건+기존 실사22건 및 재고 build를 확인했다. 단계별 계획12절에 따라 S1~S8 확장을 완료로 기록한다. S7/S8 포함 전체 구매 실행·실제 브라우저·외부 연동·운영 적용의 미검증 한계는 S8 가이드와 RESOLUTION을 따른다.

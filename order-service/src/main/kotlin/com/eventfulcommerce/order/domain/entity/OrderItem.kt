@@ -31,9 +31,11 @@ class OrderItem(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    var status: OrderItemStatus = OrderItemStatus.RESERVED
+    var status: OrderItemStatus = OrderItemStatus.RESERVED,
+
+    @Column(nullable = false, updatable = false)
+    val deliveryFeeAllocation: Long = 0
 ) : BaseTimeEntity() {
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    lateinit var id: UUID
+    var id: UUID = UUID.randomUUID()
 }

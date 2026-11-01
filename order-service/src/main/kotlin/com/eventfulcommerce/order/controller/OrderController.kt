@@ -28,7 +28,8 @@ import java.util.UUID
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Orders", description = "다판매자 다상품 주문 생성, 주문 조회, 주문 취소 API")
 class OrderController(
-    private val ordersService: OrdersService
+    private val ordersService: OrdersService,
+    private val mixedOrdersService: com.eventfulcommerce.order.service.MixedOrdersService
 ) {
 
     @GetMapping("/orders")
@@ -39,7 +40,7 @@ class OrderController(
     )
     fun getMyOrders(): ResponseEntity<List<OrderResponse>> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        return ResponseEntity.ok(ordersService.getMyOrders(userId))
+        return ResponseEntity.ok(ordersService.getMyOrders(userId).map { mixedOrdersService.decorate(it, userId) })
     }
 
     @GetMapping("/orders/users/{userId}")
@@ -54,7 +55,7 @@ class OrderController(
             throw OrderAccessDeniedException("특정 사용자 주문 조회는 관리자만 가능합니다.")
         }
 
-        return ResponseEntity.ok(ordersService.getOrdersByUserId(userId))
+        return ResponseEntity.ok(ordersService.getOrdersByUserId(userId).map { mixedOrdersService.decorate(it, userId) })
     }
 
     @GetMapping("/orders/{orderId}")
@@ -66,11 +67,11 @@ class OrderController(
     )
     fun getOrder(@PathVariable orderId: UUID): ResponseEntity<OrderResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        return ResponseEntity.ok(ordersService.getOrder(orderId, userId))
+        return ResponseEntity.ok(mixedOrdersService.getOrder(orderId, userId))
     }
 
     @PostMapping("/orders")
-    @Operation(summary = "다상품 주문 생성", description = "items 배열로 여러 상품을 한 번에 주문합니다. 서로 다른 판매자의 상품은 SellerOrder로 분리됩니다. 재고 부족 상품은 주문에서 제외되고 failedItems에 productId, reason, requestedQuantity, availableQuantity로 반환됩니다. 모든 상품이 실패하면 주문을 저장하지 않고 orderId는 null입니다.")
+    @Operation(summary = "다상품 주문 생성", description = "입점 단독은 기존 예약·멱등 응답을 유지합니다. 직매입 포함 주문은 영속 시도 ID와 성공·실패·미확인 품목, 최종 금액·구성 버전·고객 확인 필요 여부를 반환합니다. 혼합 주문은 최종 구성 확인 후 결제를 생성합니다.")
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "주문 생성 처리 완료. 일부 실패 상품이 있어도 HTTP 200으로 반환"),
         ApiResponse(responseCode = "400", description = "요청 값 검증 실패"),
@@ -91,8 +92,14 @@ class OrderController(
         val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) {
             "Idempotency-Key header is required for order creation"
         }
-        return ResponseEntity(ordersService.orders(ordersRequest, userId, key), HttpStatus.OK)
+        return ResponseEntity(mixedOrdersService.orders(ordersRequest, userId, key), HttpStatus.OK)
     }
+
+    @PostMapping("/orders/{orderId}/confirmation")
+    @Operation(summary = "혼합 주문의 최종 구성·금액 확인")
+    fun confirm(@PathVariable orderId: UUID,
+        @Valid @RequestBody request: com.eventfulcommerce.order.request.OrderConfirmationRequest): ResponseEntity<OrderResponse> =
+        ResponseEntity.ok(mixedOrdersService.confirm(orderId, SecurityContextUtil.getCurrentUserId(), request))
 
     @PostMapping("/orders/{orderId}/cancel")
     @Operation(summary = "주문 전체 취소", description = "구매자가 주문 전체를 취소합니다. 결제 전이면 예약 재고를 해제하고, 결제 완료 후면 판매자 주문별 PaymentRefund 이력을 생성해 정산 차감 이벤트를 발행합니다.")
@@ -106,7 +113,7 @@ class OrderController(
     )
     fun cancelOrder(@PathVariable orderId: UUID): ResponseEntity<OrderCancelResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        val outcome = ordersService.cancelOrder(orderId, userId)
+        val outcome = mixedOrdersService.cancel(orderId, userId)
         return ResponseEntity.status(cancellationHttpStatus(outcome)).body(OrderCancelResponse(
             success = outcome in setOf(OrderCancellationOutcome.CANCELED, OrderCancellationOutcome.ALREADY_CANCELED),
             orderId = orderId, message = cancellationMessage(outcome), outcome = outcome
@@ -128,12 +135,21 @@ class OrderController(
         @PathVariable sellerOrderId: UUID
     ): ResponseEntity<SellerOrderCancelResponse> {
         val userId = SecurityContextUtil.getCurrentUserId()
-        val outcome = ordersService.cancelSellerOrder(orderId, sellerOrderId, userId)
+        val outcome = mixedOrdersService.cancelSeller(orderId, sellerOrderId, userId)
         return ResponseEntity.status(cancellationHttpStatus(outcome)).body(SellerOrderCancelResponse(
             success = outcome in setOf(OrderCancellationOutcome.CANCELED, OrderCancellationOutcome.ALREADY_CANCELED),
             orderId = orderId, sellerOrderId = sellerOrderId,
             message = cancellationMessage(outcome), outcome = outcome
         ))
+    }
+
+    @PostMapping("/orders/{orderId}/items/{orderItemId}/cancel")
+    @Operation(summary = "직매입 품목 전량 취소")
+    fun cancelItem(@PathVariable orderId: UUID, @PathVariable orderItemId: UUID): ResponseEntity<OrderCancelResponse> {
+        val outcome = mixedOrdersService.cancelItem(orderId, orderItemId, SecurityContextUtil.getCurrentUserId())
+        return ResponseEntity.status(cancellationHttpStatus(outcome)).body(OrderCancelResponse(
+            outcome in setOf(OrderCancellationOutcome.CANCELED, OrderCancellationOutcome.ALREADY_CANCELED),
+            orderId, cancellationMessage(outcome), outcome))
     }
 
     private fun cancellationHttpStatus(outcome: OrderCancellationOutcome): HttpStatus = when (outcome) {
@@ -144,7 +160,7 @@ class OrderController(
     }
 
     private fun cancellationMessage(outcome: OrderCancellationOutcome): String = when (outcome) {
-        OrderCancellationOutcome.PENDING -> "배송 취소 확인 중입니다. 주문 조회에서 판매자별 결과를 확인하세요."
+        OrderCancellationOutcome.PENDING -> "취소 처리 중입니다. 주문 조회에서 결과를 확인하세요."
         OrderCancellationOutcome.REJECTED -> "출고된 배송은 취소할 수 없습니다. 판매자별 결과를 확인하세요."
         OrderCancellationOutcome.LOCK_UNAVAILABLE -> "취소 처리 중입니다. 잠시 후 다시 시도하세요."
         else -> "주문이 취소되었습니다"

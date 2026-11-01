@@ -1,16 +1,17 @@
 package com.eventfulcommerce.order.message
 
+import com.eventfulcommerce.common.SalesType
 import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
+import com.eventfulcommerce.common.ProductUpdatedPayload
 import com.eventfulcommerce.common.ProductStockUpdatedPayload
 import com.eventfulcommerce.order.domain.entity.ProductReadModel
 import com.eventfulcommerce.order.repository.ProductReadModelRepository
 import com.eventfulcommerce.order.service.InventoryReservationService
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional
 private val logger = KotlinLogging.logger {}
 private val supportedProductEventTypes = setOf(
     "PRODUCT_REGISTERED",
+    "PRODUCT_UPDATED",
     "PRODUCT_STOCK_UPDATED",
     "PRODUCT_DEACTIVATED"
 )
@@ -30,7 +32,7 @@ class ProductEventsConsumer(
     private val objectMapper: ObjectMapper
 ) {
     @KafkaListener(topics = ["product-events"], groupId = "order-service-group")
-    @Transactional
+    @Transactional(rollbackFor = [Exception::class])
     fun consume(message: String) {
         val event = objectMapper.readValue(message, OutboxEventMessage::class.java)
 
@@ -42,6 +44,7 @@ class ProductEventsConsumer(
         idempotencyHandler.executeIdempotent(event.eventId) {
             when (event.eventType) {
                 "PRODUCT_REGISTERED" -> handleProductRegistered(event)
+                "PRODUCT_UPDATED" -> handleProductUpdated(event)
                 "PRODUCT_STOCK_UPDATED" -> handleProductStockUpdated(event)
                 "PRODUCT_DEACTIVATED" -> handleProductDeactivated(event)
                 else -> logger.warn { "알 수 없는 product 이벤트 타입: ${event.eventType}" }
@@ -63,22 +66,44 @@ class ProductEventsConsumer(
             name = payload.name,
             price = payload.price,
             stock = payload.initialStock,
-            category = payload.category
+            category = payload.category,
+            salesType = payload.salesType
         ))
 
-        inventoryReservationService.initializeStock(payload.productId.toString(), payload.initialStock)
+        if (payload.salesType == SalesType.MARKETPLACE) {
+            inventoryReservationService.initializeStock(payload.productId.toString(), payload.initialStock)
+        }
 
         logger.info { "상품 읽기 모델 생성 + Redis 재고 초기화: ${payload.productId}, stock=${payload.initialStock}" }
+    }
+
+    private fun handleProductUpdated(event: OutboxEventMessage) {
+        val payload = objectMapper.readValue(event.payload, ProductUpdatedPayload::class.java)
+        val product = productReadModelRepository.findByIdForUpdate(payload.productId)
+            ?: error("Product read model prerequisite not found: productId=${payload.productId}")
+        require(product.salesType == payload.salesType) { "Product sales type cannot change" }
+        require(product.sellerId == payload.sellerId) { "Product seller mismatch" }
+        require(payload.price > 0 && payload.informationVersion > 0) { "Invalid product information" }
+        if (payload.informationVersion <= product.informationVersion) return
+        product.name = payload.name
+        product.price = payload.price
+        product.category = payload.category
+        product.informationVersion = payload.informationVersion
+        product.updatedAt = event.occurredAt
     }
 
     private fun handleProductStockUpdated(event: OutboxEventMessage) {
         val payload = objectMapper.readValue(event.payload, ProductStockUpdatedPayload::class.java)
 
-        val readModel = productReadModelRepository.findByIdOrNull(payload.productId) ?: run {
+        val readModel = productReadModelRepository.findByIdForUpdate(payload.productId) ?: run {
             logger.warn { "읽기 모델 없음 (재고 변경 무시): ${payload.productId}" }
             throw IllegalStateException("Product read model prerequisite not found: productId=${payload.productId}")
         }
 
+        require(readModel.sellerId == payload.sellerId) { "Product seller mismatch" }
+        require(readModel.salesType == SalesType.MARKETPLACE && payload.salesType == SalesType.MARKETPLACE) {
+            "직매입 수량은 기존 Redis 경로로 반영할 수 없습니다"
+        }
         readModel.updateStock(payload.stockDelta, payload.newStock)
         if (!payload.redisAlreadyAdjusted) {
             val redisResult = inventoryReservationService.adjustStockIdempotent(
@@ -100,7 +125,7 @@ class ProductEventsConsumer(
     private fun handleProductDeactivated(event: OutboxEventMessage) {
         val payload = objectMapper.readValue(event.payload, ProductDeactivatedPayload::class.java)
 
-        val readModel = productReadModelRepository.findByIdOrNull(payload.productId) ?: run {
+        val readModel = productReadModelRepository.findByIdForUpdate(payload.productId) ?: run {
             logger.warn { "읽기 모델 없음 (비활성화 무시): ${payload.productId}" }
             throw IllegalStateException("Product read model prerequisite not found: productId=${payload.productId}")
         }

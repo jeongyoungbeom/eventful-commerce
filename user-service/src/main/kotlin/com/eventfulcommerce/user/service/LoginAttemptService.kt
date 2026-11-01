@@ -2,6 +2,7 @@ package com.eventfulcommerce.user.service
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.stereotype.Service
 import java.util.concurrent.TimeUnit
 
@@ -16,42 +17,25 @@ class LoginAttemptService(
         private const val LOGIN_ATTEMPT_PREFIX = "login_attempt:"
         private const val MAX_ATTEMPTS = 5
         private const val LOCK_DURATION_MINUTES = 30L
+        private val RECORD_FAILURE = DefaultRedisScript(
+            "local n = redis.call('INCR', KEYS[1]); redis.call('EXPIRE', KEYS[1], ARGV[1]); return n",
+            Long::class.javaObjectType
+        )
     }
     
     /**
      * 로그인 실패 기록 (IP 기반)
      */
     fun recordFailure(ipAddress: String) {
-        val key = LOGIN_ATTEMPT_PREFIX + ipAddress
-        val attempts = getAttempts(ipAddress) + 1
-        
-        redisTemplate.opsForValue().set(
-            key,
-            attempts.toString(),
-            LOCK_DURATION_MINUTES,
-            TimeUnit.MINUTES
-        )
-        
-        logger.warn { "로그인 실패 기록: IP=$ipAddress, 시도=${attempts}회" }
+        record(LOGIN_ATTEMPT_PREFIX + ipAddress)
     }
-    
-    /**
-     * 로그인 실패 기록 (이메일 기반)
-     */
-    fun recordFailureByEmail(email: String) {
-        val key = "${LOGIN_ATTEMPT_PREFIX}email:$email"
-        val attempts = getAttemptsByEmail(email) + 1
-        
-        redisTemplate.opsForValue().set(
-            key,
-            attempts.toString(),
-            LOCK_DURATION_MINUTES,
-            TimeUnit.MINUTES
-        )
-        
-        logger.warn { "로그인 실패 기록: email=$email, 시도=${attempts}회" }
-    }
-    
+
+    fun recordFailureByEmail(email: String): Long = record("${LOGIN_ATTEMPT_PREFIX}email:$email")
+
+    private fun record(key: String): Long = checkNotNull(redisTemplate.execute(
+        RECORD_FAILURE, listOf(key), (LOCK_DURATION_MINUTES * 60).toString()
+    )) { "로그인 실패 카운터를 기록하지 못했습니다" }
+
     /**
      * 로그인 성공 시 실패 기록 초기화
      */

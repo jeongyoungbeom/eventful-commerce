@@ -6,6 +6,7 @@ include(
     "common-auth",
     "api-gateway",
     "product-service",
+    "inventory-service",
     "settlement-service",
     "order-service",
     "payment-service",

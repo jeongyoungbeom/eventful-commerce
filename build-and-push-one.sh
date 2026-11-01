@@ -5,6 +5,7 @@
 # 예시:   ./build-and-push-one.sh product-service
 
 set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
 DOCKER_USERNAME="jybeomss1"
 
@@ -17,6 +18,7 @@ VALID_SERVICES=(
     "user-service"
     "product-service"
     "settlement-service"
+    "inventory-service"
 )
 
 usage() {
@@ -62,19 +64,8 @@ echo "Image : ${IMAGE}"
 echo "=========================================="
 echo ""
 
-# Docker Hub 로그인 확인
-echo "🔐 Docker Hub 로그인 확인 중..."
-if ! docker info 2>/dev/null | grep -q "Username: ${DOCKER_USERNAME}"; then
-    echo "⚠️  Docker Hub 에 로그인되어 있지 않습니다."
-    read -r -p "지금 로그인하시겠습니까? (y/n) " REPLY
-    echo
-    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        docker login
-    else
-        echo "❌ 중단합니다. 먼저 'docker login' 을 실행하세요."
-        exit 1
-    fi
-fi
+# 저장된 Docker 로그인은 push가 사용한다.
+docker info >/dev/null
 
 # 빌드
 echo "🔨 빌드 중: ${SERVICE}..."

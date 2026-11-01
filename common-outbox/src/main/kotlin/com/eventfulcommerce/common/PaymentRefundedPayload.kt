@@ -11,5 +11,9 @@ data class PaymentRefundedPayload(
     val sellerId: UUID,
     val amount: Long,
     val reason: String,
-    val refundedAt: Instant
-)
+    val refundedAt: Instant,
+    val salesType: SalesType = SalesType.MARKETPLACE,
+    val orderItemId: UUID? = null
+) {
+    init { salesType.validateSeller(sellerId) }
+}

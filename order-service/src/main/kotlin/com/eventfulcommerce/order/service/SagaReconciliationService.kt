@@ -78,6 +78,7 @@ class SagaReconciliationService(
                 OrderCanceledSellerPayload(
                     sellerOrderId = sellerOrder.id,
                     sellerId = sellerOrder.sellerId,
+                    salesType = sellerOrder.salesType,
                     refundAmount = sellerOrder.paymentAmount,
                     items = sellerOrder.items.map { item ->
                         OrderCanceledItemPayload(

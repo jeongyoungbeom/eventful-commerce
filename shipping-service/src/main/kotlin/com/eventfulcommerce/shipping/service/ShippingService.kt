@@ -25,7 +25,7 @@ class ShippingService(
     fun handleOrderConfirmed(eventId: UUID, payloadJson: String) {
         idempotencyHandler.executeIdempotent(eventId) {
             val payload = objectMapper.readValue(payloadJson, OrderConfirmedPayload::class.java)
-            payload.sellerOrders.sortedBy { it.sellerOrderId }.forEach { seller ->
+            payload.sellerOrders.filter { it.salesType == com.eventfulcommerce.common.SalesType.MARKETPLACE }.sortedBy { it.sellerOrderId }.forEach { seller ->
                 val inserted = shippingRepository.insertIfAbsent(UUID.randomUUID(), payload.orderId,
                     seller.sellerOrderId, payload.userId, ShippingStatus.PREPARING.name, Instant.now())
                 val shipping = requireNotNull(shippingRepository.findBySellerOrderIdForUpdate(seller.sellerOrderId))

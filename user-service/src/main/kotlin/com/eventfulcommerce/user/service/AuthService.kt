@@ -1,5 +1,6 @@
 package com.eventfulcommerce.user.service
 
+import com.eventfulcommerce.user.web.clientIp
 import com.eventfulcommerce.common.auth.JwtTokenProvider
 import com.eventfulcommerce.common.auth.UserRole
 import com.eventfulcommerce.user.domain.entity.Seller
@@ -75,13 +76,14 @@ class AuthService(
         )
     }
 
-    @Transactional
+    // 인증 실패도 감사 기록과 계정 잠금은 커밋한다.
+    @Transactional(noRollbackFor = [InvalidCredentialsException::class])
     fun loginUser(request: LoginRequest, httpRequest: HttpServletRequest?): TokenResponse {
-        val ipAddress = getClientIP(httpRequest)
+        val ipAddress = clientIp(httpRequest)
 
         checkIpAndEmailBlock(request.email, ipAddress, httpRequest)
 
-        val user = userService.findByEmail(request.email) ?: run {
+        val user = userService.findByEmailForUpdate(request.email) ?: run {
             recordFailureAndThrow(ipAddress, request.email, "사용자 없음", httpRequest)
         }
 
@@ -101,13 +103,13 @@ class AuthService(
         return TokenResponse(accessToken = accessToken, refreshToken = refreshToken, userId = user.id, role = UserRole.USER)
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = [InvalidCredentialsException::class])
     fun loginSeller(request: LoginRequest, httpRequest: HttpServletRequest?): TokenResponse {
-        val ipAddress = getClientIP(httpRequest)
+        val ipAddress = clientIp(httpRequest)
 
         checkIpAndEmailBlock(request.email, ipAddress, httpRequest)
 
-        val seller = sellerService.findByEmail(request.email) ?: run {
+        val seller = sellerService.findByEmailForUpdate(request.email) ?: run {
             recordFailureAndThrow(ipAddress, request.email, "판매자 없음", httpRequest)
         }
 
@@ -178,8 +180,7 @@ class AuthService(
 
     private fun recordFailureWithLockCheck(lockable: com.eventfulcommerce.user.domain.entity.Lockable, ipAddress: String, email: String, httpRequest: HttpServletRequest?): Nothing {
         loginAttemptService.recordFailure(ipAddress)
-        loginAttemptService.recordFailureByEmail(email)
-        val attempts = loginAttemptService.getAttemptsByEmail(email)
+        val attempts = loginAttemptService.recordFailureByEmail(email)
         if (attempts >= 5) {
             accountLockService.lock(lockable)
             auditLogService.logLoginFailure(email, "5회 실패로 계정 잠금", httpRequest)
@@ -187,18 +188,5 @@ class AuthService(
             auditLogService.logLoginFailure(email, "비밀번호 불일치 (${attempts}회)", httpRequest)
         }
         throw InvalidCredentialsException()
-    }
-
-    private fun getClientIP(request: HttpServletRequest?): String {
-        if (request == null) return "unknown"
-        val headers = listOf(
-            "X-Forwarded-For", "Proxy-Client-IP", "WL-Proxy-Client-IP",
-            "HTTP_X_FORWARDED_FOR", "HTTP_CLIENT_IP", "HTTP_FORWARDED_FOR", "REMOTE_ADDR"
-        )
-        for (header in headers) {
-            val ip = request.getHeader(header)
-            if (!ip.isNullOrBlank() && ip != "unknown") return ip.split(",")[0].trim()
-        }
-        return request.remoteAddr ?: "unknown"
     }
 }

@@ -3,6 +3,7 @@ package com.eventfulcommerce.order.domain.entity
 enum class SellerOrderStatus {
     RESERVED,
     CONFIRMED,
+    PARTIALLY_CANCELED,
     CANCELED
 }
 

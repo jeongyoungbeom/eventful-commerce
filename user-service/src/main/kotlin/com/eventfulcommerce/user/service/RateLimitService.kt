@@ -1,11 +1,9 @@
 package com.eventfulcommerce.user.service
 
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.stereotype.Service
 import java.util.concurrent.TimeUnit
-
-private val logger = KotlinLogging.logger {}
 
 @Service
 class RateLimitService(
@@ -16,26 +14,29 @@ class RateLimitService(
         private const val RATE_LIMIT_PREFIX = "rate_limit:"
         private const val MAX_REQUESTS_PER_MINUTE = 100
         private const val WINDOW_SIZE_SECONDS = 60L
+        private val CHECK_LIMIT = DefaultRedisScript(
+            """
+            local count = tonumber(redis.call('GET', KEYS[1]) or '0')
+            if count >= tonumber(ARGV[1]) then
+                if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end
+                return 0
+            end
+            redis.call('INCR', KEYS[1])
+            if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end
+            return 1
+            """.trimIndent(), Long::class.javaObjectType
+        )
     }
     
     /**
      * Rate Limit 확인 (IP 기반)
      * @return true: 허용, false: 차단
      */
-    fun checkRateLimit(ipAddress: String): Boolean {
-        val currentCount = getCurrentCount(ipAddress)
-        
-        if (currentCount >= MAX_REQUESTS_PER_MINUTE) {
-            logger.warn { "⚠️ Rate Limit 초과: IP=$ipAddress, 요청=${currentCount}회" }
-            return false
-        }
-        
-        // 요청 카운트 증가
-        incrementCount(ipAddress)
-        
-        return true
-    }
-    
+    fun checkRateLimit(ipAddress: String): Boolean = checkNotNull(redisTemplate.execute(
+        CHECK_LIMIT, listOf(RATE_LIMIT_PREFIX + ipAddress),
+        MAX_REQUESTS_PER_MINUTE.toString(), WINDOW_SIZE_SECONDS.toString()
+    )) { "요청 제한 카운터를 확인하지 못했습니다" } == 1L
+
     /**
      * 현재 요청 카운트 조회
      */
@@ -43,29 +44,6 @@ class RateLimitService(
         val key = RATE_LIMIT_PREFIX + ipAddress
         val value = redisTemplate.opsForValue().get(key)
         return value?.toIntOrNull() ?: 0
-    }
-    
-    /**
-     * 요청 카운트 증가
-     */
-    private fun incrementCount(ipAddress: String) {
-        val key = RATE_LIMIT_PREFIX + ipAddress
-        val currentCount = getCurrentCount(ipAddress)
-        
-        if (currentCount == 0) {
-            // 첫 요청이면 TTL 설정
-            redisTemplate.opsForValue().set(
-                key,
-                "1",
-                WINDOW_SIZE_SECONDS,
-                TimeUnit.SECONDS
-            )
-        } else {
-            // 카운트만 증가 (TTL 유지)
-            redisTemplate.opsForValue().increment(key)
-        }
-        
-        logger.debug { "Rate Limit 카운트: IP=$ipAddress, 현재=${currentCount + 1}회" }
     }
     
     /**

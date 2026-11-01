@@ -113,12 +113,14 @@ class InventoryReservationService(
         orderId: UUID,
         quantity: Int,
         ttlSeconds: Long,
-        reservationId: UUID = UUID.randomUUID()
+        reservationId: UUID = UUID.randomUUID(),
+        absoluteExpiresAt: Instant? = null,
+        retainFailure: Boolean = false
     ): UUID? {
         require(quantity > 0) { "quantity must be greater than zero" }
         require(ttlSeconds > 0) { "ttlSeconds must be greater than zero" }
 
-        val expiresAt = Instant.now().plusSeconds(ttlSeconds)
+        val expiresAt = absoluteExpiresAt ?: Instant.now().plusSeconds(ttlSeconds)
         // Register first. A crash can leave a harmless stale product ID, but never an undiscoverable hold.
         redisTemplate.opsForSet().add(reservationProductsKey(), productId)
         val result = redisTemplate.execute(
@@ -133,7 +135,8 @@ class InventoryReservationService(
             productId,
             reservationId.toString(),
             quantity.toString(),
-            expiresAt.toEpochMilli().toString()
+            *(listOf(expiresAt.toEpochMilli().toString()) +
+                if (retainFailure) listOf(terminalRetentionMillis.toString()) else emptyList()).toTypedArray()
         )
 
         return when (result) {
@@ -200,7 +203,8 @@ class InventoryReservationService(
     fun commit(
         productId: String,
         reservationId: UUID,
-        quantity: Int
+        quantity: Int,
+        requireUnexpired: Boolean = false
     ): InventoryReservationActionResult {
         val resultCode = redisTemplate.execute(
             commitScript,
@@ -213,7 +217,8 @@ class InventoryReservationService(
             reservationId.toString(),
             terminalRetentionMillis.toString(),
             productId,
-            Instant.now().toEpochMilli().toString()
+            Instant.now().toEpochMilli().toString(),
+            requireUnexpired.toString()
         )
         val result = actionResult(resultCode)
 
@@ -244,6 +249,14 @@ class InventoryReservationService(
 
         logActionResult("release", productId, reservationId, quantity, result)
         return result
+    }
+
+    fun releaseIntent(productId: String, orderId: UUID, reservationId: UUID, quantity: Int, expiresAt: Instant): InventoryReservationActionResult {
+        require(quantity > 0)
+        return actionResult(redisTemplate.execute(releaseScript,
+            listOf(stockKey(productId), holdKey(productId, reservationId), holdCountKey(productId), expirationKey(productId)),
+            quantity.toString(), reservationId.toString(), terminalRetentionMillis.toString(), productId,
+            Instant.now().toEpochMilli().toString(), orderId.toString(), expiresAt.toEpochMilli().toString()))
     }
 
     /** 확정된 판매 재고를 취소로 복원한다. 같은 reservationId는 최초 한 번만 증가한다. */

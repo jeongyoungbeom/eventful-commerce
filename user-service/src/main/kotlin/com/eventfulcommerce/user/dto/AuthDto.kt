@@ -91,7 +91,8 @@ data class TokenResponse(
 )
 
 @Schema(description = "Access Token 재발급 요청")
-data class RefreshRequest(
+data class RefreshRequest @com.fasterxml.jackson.annotation.JsonCreator(mode = com.fasterxml.jackson.annotation.JsonCreator.Mode.PROPERTIES) constructor(
+    @param:com.fasterxml.jackson.annotation.JsonProperty(value = "refreshToken", required = true)
     @field:Schema(description = "Refresh Token", required = true)
     @field:NotBlank(message = "Refresh Token은 필수입니다")
     val refreshToken: String

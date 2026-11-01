@@ -20,12 +20,15 @@ data class SellerOrderResponse(
     val status: SellerOrderStatus,
     val cancellationStatus: com.eventfulcommerce.order.domain.entity.CancellationStatus,
     val cancellationRequestId: UUID?,
-    val items: List<OrderItemResponse>
+    val items: List<OrderItemResponse>,
+    val salesType: com.eventfulcommerce.common.SalesType = com.eventfulcommerce.common.SalesType.MARKETPLACE,
+    val inventorySource: com.eventfulcommerce.common.InventorySource = salesType.inventorySource
 ) {
     companion object {
         fun from(sellerOrder: SellerOrder) = SellerOrderResponse(
             sellerOrderId = sellerOrder.id,
             sellerId = sellerOrder.sellerId,
+            salesType = sellerOrder.salesType,
             itemTotalAmount = sellerOrder.itemTotalAmount,
             deliveryFee = sellerOrder.deliveryFee,
             paymentAmount = sellerOrder.paymentAmount,
@@ -44,7 +47,8 @@ data class SellerOrderResponse(
                     unitPrice = it.unitPrice,
                     totalAmount = it.totalAmount,
                     reservationId = it.reservationId,
-                    status = it.status
+                    status = it.status,
+                    deliveryFeeAllocation = it.deliveryFeeAllocation
                 )
             }
         )

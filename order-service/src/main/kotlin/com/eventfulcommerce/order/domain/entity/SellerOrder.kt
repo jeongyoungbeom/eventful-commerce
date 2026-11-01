@@ -2,6 +2,7 @@ package com.eventfulcommerce.order.domain.entity
 
 import com.eventfulcommerce.common.BaseTimeEntity
 import jakarta.persistence.*
+import com.eventfulcommerce.common.SalesType
 import java.util.UUID
 
 @Entity
@@ -19,7 +20,7 @@ class SellerOrder(
     @JoinColumn(name = "order_id", nullable = false)
     val order: Orders,
 
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     val sellerId: UUID,
 
     @Column(nullable = false)
@@ -45,11 +46,15 @@ class SellerOrder(
     var status: SellerOrderStatus = SellerOrderStatus.RESERVED,
 
     @OneToMany(mappedBy = "sellerOrder", cascade = [CascadeType.ALL], orphanRemoval = true)
-    val items: MutableList<OrderItem> = mutableListOf()
+    val items: MutableList<OrderItem> = mutableListOf(),
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, updatable = false)
+    val salesType: SalesType = SalesType.MARKETPLACE
 ) : BaseTimeEntity() {
+    init { salesType.validateSeller(sellerId) }
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    lateinit var id: UUID
+    var id: UUID = UUID.randomUUID()
 
     @Enumerated(EnumType.STRING)
     @Column(name = "cancellation_status", nullable = false)

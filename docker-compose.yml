@@ -260,11 +260,18 @@ services:
     restart: always
 
   order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
     image: jybeomss1/order-service:latest
     container_name: order-service
     environment:
       - SPRING_PROFILES_ACTIVE=docker
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - INVENTORY_SERVICE_URL=http://inventory-service:8088
+      - INVENTORY_SERVICE_TOKEN=${INVENTORY_SERVICE_TOKEN:-}
+      - DIRECT_PURCHASE_DELIVERY_FEE=${DIRECT_PURCHASE_DELIVERY_FEE:-0}
+      - DIRECT_PURCHASE_FREE_DELIVERY_THRESHOLD=${DIRECT_PURCHASE_FREE_DELIVERY_THRESHOLD:-9223372036854775807}
     depends_on:
       postgres:
         condition: service_healthy
@@ -374,6 +381,25 @@ services:
       - IMAGE_BASE_URL=${IMAGE_BASE_URL:-http://localhost/images}
     volumes:
       - product-images:/app/images
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - eventful-network
+    restart: on-failure
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
+    image: jybeomss1/inventory-service:latest
+    container_name: inventory-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - INVENTORY_SERVICE_TOKEN=${INVENTORY_SERVICE_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -33,6 +33,7 @@ class JwtTokenProvider(
     fun createRefreshToken(userId: UUID, role: UserRole): String {
         val now = Date()
         return Jwts.builder()
+            .id(UUID.randomUUID().toString())
             .subject(userId.toString())
             .claim("role", role.toString())
             .claim("type", "refresh")

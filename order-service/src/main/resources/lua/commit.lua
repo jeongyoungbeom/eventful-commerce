@@ -6,6 +6,7 @@
 -- ARGV[3] = terminalRetentionMillis
 -- ARGV[4] = productId
 -- ARGV[5] = terminalAtEpochMilli
+-- ARGV[6] = requireUnexpired (mixed orders only)
 
 local expirationType = redis.call('TYPE', KEYS[3]).ok
 if expirationType ~= 'none' and expirationType ~= 'zset' then
@@ -58,6 +59,15 @@ if status == 'RELEASED' or status == 'RESTOCKED' then
 end
 if status ~= 'RESERVED' then
     return -1
+end
+
+-- 혼합 예약의 기한은 실제 확정과 같은 원자적 실행에서 판정한다. 기확정 재시도는 위에서 처리한다.
+if ARGV[6] == 'true' then
+    if holdType ~= 'hash' then return -1 end
+    local expiresAt = tonumber(redis.call('HGET', KEYS[1], 'expiresAtEpochMilli'))
+    if expiresAt == nil or expiresAt <= 0 then return -1 end
+    local now = redis.call('TIME')
+    if tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) >= expiresAt then return 3 end
 end
 
 local holdCountType = redis.call('TYPE', KEYS[2]).ok

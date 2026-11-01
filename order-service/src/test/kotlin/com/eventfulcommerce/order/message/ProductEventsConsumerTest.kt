@@ -4,6 +4,7 @@ import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OutboxEventMessage
 import com.eventfulcommerce.common.ProductDeactivatedPayload
 import com.eventfulcommerce.common.ProductRegisteredPayload
+import com.eventfulcommerce.common.ProductUpdatedPayload
 import com.eventfulcommerce.common.ProductStockUpdatedPayload
 import com.eventfulcommerce.common.repository.ProcessedEventRepository
 import com.eventfulcommerce.order.domain.entity.ProductReadModel
@@ -22,7 +23,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.util.Optional
 import java.util.UUID
 
 class ProductEventsConsumerTest {
@@ -45,6 +45,41 @@ class ProductEventsConsumerTest {
             IdempotencyHandler(processedEventRepository),
             objectMapper
         )
+    }
+
+    @Test fun `직매입 등록과 정보 수정은 읽기 모델만 갱신하고 Redis를 만들지 않는다`() {
+        val id = UUID.randomUUID()
+        val saved = slot<ProductReadModel>()
+        every { productReadModelRepository.existsById(id) } returns false
+        every { productReadModelRepository.save(capture(saved)) } answers { firstArg() }
+        val direct = ProductRegisteredPayload(id, com.eventfulcommerce.common.SalesType.OFFICIAL_SELLER_ID,
+            "공식 상품", 1_000, 0, "FLOWERS", com.eventfulcommerce.common.SalesType.DIRECT_PURCHASE, schemaVersion = 2)
+        consumer.consume(message("PRODUCT_REGISTERED", direct))
+        every { productReadModelRepository.findByIdForUpdate(id) } returns saved.captured
+        consumer.consume(message("PRODUCT_UPDATED", ProductUpdatedPayload(id, direct.sellerId,
+            "이름 변경", 2_000, "FLOWERS", 1, direct.salesType, schemaVersion = 2)))
+        assertEquals(direct.salesType, saved.captured.salesType)
+        assertEquals(2_000L, saved.captured.price)
+        verify(exactly = 0) { inventoryReservationService.initializeStock(any(), any()) }
+        verify(exactly = 0) { inventoryReservationService.adjustStockIdempotent(any(), any(), any()) }
+    }
+    @Test fun `입점 유형 전환과 직매입의 Redis 수량 조정을 거부한다`() {
+        val id = UUID.randomUUID()
+        val direct = ProductReadModel(id, com.eventfulcommerce.common.SalesType.OFFICIAL_SELLER_ID,
+            "공식 상품", 1_000, 0, "FLOWERS", salesType = com.eventfulcommerce.common.SalesType.DIRECT_PURCHASE)
+        every { productReadModelRepository.findByIdForUpdate(id) } returns direct
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
+            consumer.consume(message("PRODUCT_STOCK_UPDATED", ProductStockUpdatedPayload(id, direct.sellerId,
+                100, 100, salesType = direct.salesType, schemaVersion = 2)))
+        }
+        val marketplace = readModel(UUID.randomUUID(), 10)
+        every { productReadModelRepository.findByIdForUpdate(marketplace.productId) } returns marketplace
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
+            consumer.consume(message("PRODUCT_UPDATED", ProductUpdatedPayload(marketplace.productId, direct.sellerId,
+                "위조", 1_000, "FLOWERS", 2, direct.salesType, schemaVersion = 2)))
+        }
+        assertEquals(0, direct.stock)
+        verify(exactly = 0) { inventoryReservationService.adjustStockIdempotent(any(), any(), any()) }
     }
 
     @Test
@@ -109,7 +144,7 @@ class ProductEventsConsumerTest {
         val productId = UUID.randomUUID()
         val readModel = readModel(productId, stock = 10)
 
-        every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
+        every { productReadModelRepository.findByIdForUpdate(productId) } returns readModel
         every {
             inventoryReservationService.adjustStockIdempotent(productId.toString(), any(), 5)
         } returns InventoryReservationActionResult.APPLIED
@@ -148,7 +183,7 @@ class ProductEventsConsumerTest {
             eventId = eventId
         )
         every { processedEventRepository.insertIfAbsent(eventId) } returnsMany listOf(1, 0)
-        every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
+        every { productReadModelRepository.findByIdForUpdate(productId) } returns readModel
         every {
             inventoryReservationService.adjustStockIdempotent(productId.toString(), eventId, 5)
         } returns InventoryReservationActionResult.APPLIED
@@ -157,7 +192,7 @@ class ProductEventsConsumerTest {
         consumer.consume(value)
 
         assertEquals(15, readModel.stock)
-        verify(exactly = 1) { productReadModelRepository.findById(productId) }
+        verify(exactly = 1) { productReadModelRepository.findByIdForUpdate(productId) }
         verify(exactly = 1) {
             inventoryReservationService.adjustStockIdempotent(productId.toString(), eventId, 5)
         }
@@ -167,7 +202,7 @@ class ProductEventsConsumerTest {
     fun `Order Redis에서 이미 반영된 재고 이벤트는 읽기 모델만 갱신하고 Redis를 다시 조정하지 않는다`() {
         val productId = UUID.randomUUID()
         val readModel = readModel(productId, stock = 10)
-        every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
+        every { productReadModelRepository.findByIdForUpdate(productId) } returns readModel
 
         consumer.consume(
             message(
@@ -193,7 +228,7 @@ class ProductEventsConsumerTest {
         val productId = UUID.randomUUID()
         val readModel = readModel(productId)
 
-        every { productReadModelRepository.findById(productId) } returns Optional.of(readModel)
+        every { productReadModelRepository.findByIdForUpdate(productId) } returns readModel
 
         consumer.consume(
             message(
@@ -218,6 +253,32 @@ class ProductEventsConsumerTest {
         )
 
         verify(exactly = 0) { processedEventRepository.insertIfAbsent(eventId) }
+    }
+
+    @Test
+    fun `상품 정보는 최신 순번만 적용하며 중복과 늦은 변경이 재고와 비활성화를 되돌리지 않는다`() {
+        val product = readModel(UUID.randomUUID(), stock = 7).apply { status = "INACTIVE" }
+        every { productReadModelRepository.findByIdForUpdate(product.productId) } returns product
+        fun update(version: Long, price: Long) = message("PRODUCT_UPDATED", ProductUpdatedPayload(
+            product.productId, product.sellerId, "수정 상품", price, "FLOWERS", version))
+        consumer.consume(update(2, 20_000))
+        consumer.consume(update(2, 30_000))
+        consumer.consume(update(1, 10_000))
+        assertEquals(20_000L, product.price)
+        assertEquals("수정 상품", product.name)
+        assertEquals(2L, product.informationVersion)
+        assertEquals(7, product.stock)
+        assertEquals("INACTIVE", product.status)
+        verify(exactly = 0) { inventoryReservationService.initializeStock(any(), any()) }
+    }
+
+    @Test
+    fun `등록 전 변경은 재시도할 수 있도록 실패한다`() {
+        val id = UUID.randomUUID()
+        every { productReadModelRepository.findByIdForUpdate(id) } returns null
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            consumer.consume(message("PRODUCT_UPDATED", ProductUpdatedPayload(id, UUID.randomUUID(), "수정", 10_000, "FLOWERS", 1)))
+        }
     }
 
     private fun readModel(productId: UUID, stock: Int = 10) = ProductReadModel(

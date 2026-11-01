@@ -190,6 +190,15 @@ class GlobalExceptionHandler {
         )
     }
 
+    @ExceptionHandler(OrderCompositionConflictException::class)
+    fun handleCompositionConflict(ex: OrderCompositionConflictException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ErrorResponse(code = "ORDER_COMPOSITION_CHANGED", message = requireNotNull(ex.message), timestamp = Instant.now()))
+
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException::class)
+    fun handleUnreadable(): ResponseEntity<ErrorResponse> =
+        ResponseEntity.badRequest().body(ErrorResponse(code = "INVALID_ARGUMENT", message = "주문 요청 형식이 잘못되었습니다.", timestamp = Instant.now()))
+
     @ExceptionHandler(NoResourceFoundException::class)
     fun handleNoResourceFound(ex: NoResourceFoundException): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(

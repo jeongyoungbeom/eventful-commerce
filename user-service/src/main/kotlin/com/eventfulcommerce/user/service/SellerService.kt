@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional
 class SellerService(
     private val sellerRepository: SellerRepository
 ) {
+    fun findByEmailForUpdate(email: String): Seller? = sellerRepository.findByEmailForUpdate(email)
+
 
     fun findByEmail(email: String): Seller? =
         sellerRepository.findByEmail(email)

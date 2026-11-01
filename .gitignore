@@ -50,3 +50,23 @@ scripts/results/
 AGENTS.md
 .agents/
 .workflow/
+
+# Python test helpers
+__pycache__/
+*.pyc
+
+### Local Commerce Soak Tests ###
+/run-soak-test.sh
+/scripts/test-11-mixed-fulfillment.py
+/scripts/test-12-commerce-soak.py
+/scripts/lib/commerce_soak.py
+/scripts/lib/commerce_test_env.py
+/scripts/lib/commerce_verify.py
+/scripts/test_commerce_cli.py
+/scripts/test_commerce_env.py
+/scripts/test_commerce_orders.py
+/scripts/test_commerce_traffic.py
+/scripts/test_commerce_verify.py
+/docs/commerce-soak-test-design.md
+/docs/commerce-soak-test-guide.md
+/reviews/EC-COMMERCE-SOAK-20261029/

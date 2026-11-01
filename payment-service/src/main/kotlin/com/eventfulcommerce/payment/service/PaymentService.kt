@@ -1,5 +1,6 @@
 package com.eventfulcommerce.payment.service
 
+import com.eventfulcommerce.common.*
 import com.eventfulcommerce.common.IdempotencyHandler
 import com.eventfulcommerce.common.OrderCanceledPayload
 import com.eventfulcommerce.common.OrderReservedPayload
@@ -33,6 +34,24 @@ class PaymentService(
     fun handleOrderCreated(message: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(message.eventId) {
             val payload = objectMapper.readValue(message.payload, OrderReservedPayload::class.java)
+            if (payload.sellerOrders.any { it.salesType == SalesType.DIRECT_PURCHASE }) {
+                require(payload.compositionVersion != null && payload.confirmedVersion == payload.compositionVersion) {
+                    "고객 확인 없는 혼합 결제는 허용되지 않습니다"
+                }
+                require(payload.totalPaymentAmount > 0 && payload.sellerOrders.map { it.sellerOrderId }.distinct().size == payload.sellerOrders.size)
+                var remaining = payload.totalPaymentAmount
+                payload.sellerOrders.forEach { seller ->
+                    require(seller.paymentAmount >= 0 && seller.paymentAmount <= remaining)
+                    remaining -= seller.paymentAmount
+                    if (seller.salesType == SalesType.DIRECT_PURCHASE) {
+                        require(seller.items.isNotEmpty() && seller.commissionAmount == 0L && seller.settlementAmount == 0L)
+                        require(seller.items.map { it.orderItemId }.distinct().size == seller.items.size)
+                        require(seller.items.all { it.quantity > 0 && it.unitPrice >= 0 && it.totalAmount == Math.multiplyExact(it.unitPrice, it.quantity.toLong()) })
+                        require(seller.items.fold(0L) { total, item -> Math.addExact(total, Math.addExact(item.totalAmount, item.deliveryFeeAllocation)) } == seller.paymentAmount)
+                    }
+                }
+                require(remaining == 0L)
+            }
             if (paymentRepository.findByOrderId(payload.orderId) != null) return@executeIdempotent
 
             paymentRepository.save(
@@ -49,7 +68,9 @@ class PaymentService(
                                 paymentAmount = it.paymentAmount,
                                 commissionRate = it.commissionRate,
                                 commissionAmount = it.commissionAmount,
-                                settlementAmount = it.settlementAmount
+                                settlementAmount = it.settlementAmount,
+                                salesType = it.salesType,
+                                items = if (payload.compositionVersion != null) it.items else emptyList()
                             )
                         }
                     )
@@ -63,6 +84,9 @@ class PaymentService(
     fun handleOrderCanceled(message: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(message.eventId) {
             val payload = objectMapper.readValue(message.payload, OrderCanceledPayload::class.java)
+            require(payload.canceledSellerOrders.all { (it.salesType == SalesType.DIRECT_PURCHASE) == (it.orderItemId != null) }) {
+                "직매입 환불만 품목 ID를 사용합니다"
+            }
             val payment = paymentRepository.findByOrderIdForUpdate(payload.orderId)
                 ?: throw IllegalStateException("Payment prerequisite not found for canceled order: orderId=${payload.orderId}")
 
@@ -80,6 +104,9 @@ class PaymentService(
     fun handleOrderCancellationReconciliation(message: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(message.eventId) {
             val payload = objectMapper.readValue(message.payload, OrderCanceledPayload::class.java)
+            require(payload.canceledSellerOrders.all { (it.salesType == SalesType.DIRECT_PURCHASE) == (it.orderItemId != null) }) {
+                "직매입 환불만 품목 ID를 사용합니다"
+            }
             val payment = paymentRepository.findByOrderIdForUpdate(payload.orderId)
                 ?: throw IllegalStateException(
                     "Payment prerequisite not found for cancellation reconciliation: orderId=${payload.orderId}"
@@ -91,7 +118,7 @@ class PaymentService(
                 PaymentStatus.PAYMENT_PARTIALLY_REFUNDED,
                 PaymentStatus.PAYMENT_REFUNDED -> {
                     val newlyCreatedRefunds = refundCanceledOrder(payment, payload)
-                    rePublishExistingRefunds(payment, payload, newlyCreatedRefunds.map { it.sellerOrderId }.toSet())
+                    rePublishExistingRefunds(payment, payload, newlyCreatedRefunds.map { it.refundKey }.toSet())
                 }
                 else -> businessMetrics.increment("payment.refund", "reconciliation_not_required")
             }
@@ -112,6 +139,22 @@ class PaymentService(
         payment.cancellationRequested = false
     }
 
+    private fun key(target: OrderCanceledSellerPayload) = target.orderItemId ?: target.sellerOrderId
+
+    private fun validateTarget(payment: Payment, target: OrderCanceledSellerPayload) {
+        if (target.salesType == SalesType.MARKETPLACE) {
+            require(target.orderItemId == null) { "입점 환불은 판매자 주문 단위입니다" }
+            return
+        }
+        val itemId = requireNotNull(target.orderItemId) { "직매입 환불은 품목 ID가 필요합니다" }
+        val seller = objectMapper.readValue(payment.sellerOrdersJson, Array<PaymentCompletedSellerPayload>::class.java)
+            .singleOrNull { it.sellerOrderId == target.sellerOrderId } ?: error("원본 판매자 주문이 없습니다")
+        require(seller.salesType == target.salesType && seller.sellerId == target.sellerId)
+        val item = seller.items.singleOrNull { it.orderItemId == itemId } ?: error("원본 결제 품목이 없습니다")
+        require(target.items == listOf(OrderCanceledItemPayload(item.orderItemId, item.productId, item.quantity, item.totalAmount)))
+        require(target.refundAmount == Math.addExact(item.totalAmount, item.deliveryFeeAllocation)) { "원본 품목 환불액과 다릅니다" }
+    }
+
     private fun pendingCancellations(payment: Payment): List<OrderCanceledPayload> =
         payment.pendingCancellationPayload?.let {
             objectMapper.readValue(it, Array<OrderCanceledPayload>::class.java).toList()
@@ -129,17 +172,19 @@ class PaymentService(
     private fun deferCancellation(payment: Payment, payload: OrderCanceledPayload) {
         validateCancellation(payment, payload)
         val pending = pendingCancellations(payment).associateBy {
-            it.canceledSellerOrders.single().sellerOrderId
+            key(it.canceledSellerOrders.single())
         }.toMutableMap()
         payload.canceledSellerOrders.forEach { canceled ->
             require(canceled.refundAmount > 0) { "Refund amount must be positive" }
-            val existing = pending[canceled.sellerOrderId]?.canceledSellerOrders?.single()
+            validateTarget(payment, canceled)
+            val existing = pending[key(canceled)]?.canceledSellerOrders?.single()
             if (existing != null) {
-                require(existing.sellerId == canceled.sellerId && existing.refundAmount == canceled.refundAmount) {
+                require(existing.sellerId == canceled.sellerId && existing.refundAmount == canceled.refundAmount &&
+                    (canceled.salesType == SalesType.MARKETPLACE || existing == canceled)) {
                     "Conflicting pending cancellation: sellerOrderId=${canceled.sellerOrderId}"
                 }
             } else {
-                pending[canceled.sellerOrderId] = payload.copy(canceledSellerOrders = listOf(canceled))
+                pending[key(canceled)] = payload.copy(canceledSellerOrders = listOf(canceled))
             }
         }
         var remaining = payment.amount - payment.refundedAmount
@@ -159,9 +204,14 @@ class PaymentService(
         validateCancellation(payment, payload)
         val createdRefunds = payload.canceledSellerOrders.mapNotNull { canceled ->
             require(canceled.refundAmount > 0) { "Refund amount must be positive" }
-            val existing = paymentRefundRepository.findByPaymentIdAndSellerOrderId(payment.id, canceled.sellerOrderId)
+            validateTarget(payment, canceled)
+            val existing = if (canceled.salesType == SalesType.MARKETPLACE)
+                paymentRefundRepository.findByPaymentIdAndSellerOrderId(payment.id, canceled.sellerOrderId)
+                else paymentRefundRepository.findByPaymentIdAndRefundKey(payment.id, key(canceled))
             if (existing != null) {
-                require(existing.sellerId == canceled.sellerId && existing.amount == canceled.refundAmount) {
+                require(existing.sellerId == canceled.sellerId && existing.amount == canceled.refundAmount &&
+                    existing.salesType == canceled.salesType && existing.orderItemId == canceled.orderItemId &&
+                    (canceled.salesType == SalesType.MARKETPLACE || existing.requestContent == objectMapper.writeValueAsString(canceled))) {
                     "Conflicting refund: sellerOrderId=${canceled.sellerOrderId}"
                 }
                 return@mapNotNull null
@@ -176,7 +226,10 @@ class PaymentService(
                     sellerOrderId = canceled.sellerOrderId,
                     sellerId = canceled.sellerId,
                     amount = canceled.refundAmount,
-                    reason = payload.reason
+                    reason = payload.reason,
+                    orderItemId = canceled.orderItemId,
+                    salesType = canceled.salesType,
+                    requestContent = if (canceled.salesType == SalesType.DIRECT_PURCHASE) objectMapper.writeValueAsString(canceled) else null
                 )
             )
             payment.refundedAmount += refund.amount
@@ -201,12 +254,12 @@ class PaymentService(
         payload: OrderCanceledPayload,
         newlyCreatedSellerOrderIds: Set<UUID>
     ) {
-        val sellerOrderIds = payload.canceledSellerOrders
-            .map { it.sellerOrderId }
-            .filterNot { it in newlyCreatedSellerOrderIds }
-        if (sellerOrderIds.isEmpty()) return
-
-        val existingRefunds = paymentRefundRepository.findByPaymentIdAndSellerOrderIdIn(payment.id, sellerOrderIds)
+        val targets = payload.canceledSellerOrders.filterNot { key(it) in newlyCreatedSellerOrderIds }
+        val marketplaceIds = targets.filter { it.salesType == SalesType.MARKETPLACE }.map { it.sellerOrderId }
+        val existingRefunds = (if (marketplaceIds.isEmpty()) emptyList() else
+            paymentRefundRepository.findByPaymentIdAndSellerOrderIdIn(payment.id, marketplaceIds)) +
+            targets.filter { it.salesType == SalesType.DIRECT_PURCHASE }.mapNotNull {
+                paymentRefundRepository.findByPaymentIdAndRefundKey(payment.id, key(it)) }
         publishRefundEvents(payment, existingRefunds)
         if (existingRefunds.isNotEmpty()) {
             businessMetrics.increment("payment.refund", "reconciliation_republished")
@@ -230,7 +283,9 @@ class PaymentService(
                             sellerId = refund.sellerId,
                             amount = refund.amount,
                             reason = refund.reason,
-                            refundedAt = refund.refundedAt
+                            refundedAt = refund.refundedAt,
+                            salesType = refund.salesType,
+                            orderItemId = refund.orderItemId
                         )
                     ),
                     status = OutboxStatus.PENDING

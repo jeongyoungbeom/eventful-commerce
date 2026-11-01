@@ -46,3 +46,7 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# Local credentials must never enter image layers
+.env
+.env.*

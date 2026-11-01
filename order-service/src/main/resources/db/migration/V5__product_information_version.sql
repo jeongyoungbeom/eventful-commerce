@@ -1,0 +1,1 @@
+ALTER TABLE IF EXISTS product_read_model ADD COLUMN IF NOT EXISTS information_version BIGINT NOT NULL DEFAULT 0;

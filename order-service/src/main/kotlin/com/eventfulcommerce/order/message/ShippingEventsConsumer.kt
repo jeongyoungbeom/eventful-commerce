@@ -9,7 +9,8 @@ import org.springframework.stereotype.Component
 @Component
 class ShippingEventsConsumer(
     private val objectMapper: ObjectMapper,
-    private val ordersService: OrdersService
+    private val ordersService: OrdersService,
+    private val mixedOrdersService: com.eventfulcommerce.order.service.MixedOrdersService
 ) {
     @KafkaListener(topics = ["shipping-events"], groupId = "order-service-group")
     fun receive(value: String) {
@@ -18,5 +19,7 @@ class ShippingEventsConsumer(
             "SHIPPING_FAILED" -> ordersService.handleShippingFailed(event)
             "SHIPPING_CANCELLATION_DECIDED" -> ordersService.handleShippingCancellationDecided(event)
         }
+        val id = objectMapper.readTree(event.payload).get("orderId")?.asText()?.let(java.util.UUID::fromString)
+        if (id != null && mixedOrdersService.contains(id)) mixedOrdersService.recover(id)
     }
 }

@@ -1,124 +1,72 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
 DOCKER_USERNAME="jybeomss1"
+SERVICES=(api-gateway order-service payment-service shipping-service notification-service user-service product-service settlement-service inventory-service)
 
-echo "🐳 Eventful Commerce - Production Deployment"
-echo "=========================================="
-echo ""
+docker info >/dev/null
+docker compose version >/dev/null
 
-# Check if .env file exists
-if [ ! -f .env ]; then
-    echo "📝 .env file not found. Creating with auto-generated secrets..."
-    
-    # Generate JWT secret
-    if command -v openssl &> /dev/null; then
-        JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-        
-        # Create .env file
-        cat > .env << EOF
-# Auto-generated environment variables
-# Generated at: $(date)
-
-# CORS (쉼표로 구분해서 여러 origin 허용 가능, * 는 전체 허용)
-CORS_ALLOWED_ORIGINS=*
-
-# JWT Secret (Auto-generated)
-JWT_SECRET=${JWT_SECRET}
-
-# Telegram Notification (Optional - configure via API)
+if [[ ! -f .env ]]; then
+    umask 077
+    cat > .env <<'ENV'
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+GMAIL_USERNAME=
+GMAIL_APP_PASSWORD=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_BOT_USERNAME=
 TELEGRAM_DEFAULT_USER_ID=
 TELEGRAM_DEFAULT_CHAT_ID=
-EOF
-        
-        echo "✅ .env file created with secure JWT secret"
-        echo ""
-    else
-        echo "❌ Error: openssl not found!"
-        echo "Please install openssl: sudo apt-get install openssl"
-        exit 1
-    fi
-else
-    # Check if JWT_SECRET exists in .env
-    if ! grep -q "JWT_SECRET=" .env || ! grep -q "JWT_SECRET=.\+" .env; then
-        echo "⚠️  JWT_SECRET not found in .env file"
-        echo "📝 Generating and adding JWT_SECRET..."
-        
-        if command -v openssl &> /dev/null; then
-            JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-            
-            # Add or update JWT_SECRET in .env
-            if grep -q "JWT_SECRET=" .env; then
-                sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" .env
-            else
-                echo "" >> .env
-                echo "# Auto-generated JWT Secret" >> .env
-                echo "JWT_SECRET=${JWT_SECRET}" >> .env
-            fi
-            
-            echo "✅ JWT_SECRET added to .env file"
-            echo ""
-        else
-            echo "❌ Error: openssl not found!"
-            exit 1
-        fi
-    else
-        echo "✅ .env file found with JWT_SECRET"
-        echo ""
-    fi
+ENV
+    echo "📝 .env 생성 완료. 메일 사용에 필요한 GMAIL_USERNAME/GMAIL_APP_PASSWORD를 설정하세요."
 fi
 
-# Pull latest images
-echo "📥 Pulling latest images from Docker Hub..."
-echo "Username: ${DOCKER_USERNAME}"
-echo ""
+chmod 600 .env
 
-docker pull ${DOCKER_USERNAME}/api-gateway:latest
-docker pull ${DOCKER_USERNAME}/order-service:latest
-docker pull ${DOCKER_USERNAME}/payment-service:latest
-docker pull ${DOCKER_USERNAME}/shipping-service:latest
-docker pull ${DOCKER_USERNAME}/notification-service:latest
-docker pull ${DOCKER_USERNAME}/user-service:latest
-docker pull ${DOCKER_USERNAME}/product-service:latest
-docker pull ${DOCKER_USERNAME}/settlement-service:latest
+ensure_secret() {
+    local key="$1" generated configured
+    configured=$(sed -n "s/^${key}=//p" .env | tail -n 1)
+    configured=${configured//[[:space:]]/}
+    if [[ -n "${!key:-}" ]] || [[ -n "$configured" && "$configured" != '""' && "$configured" != "''" ]]; then
+        return
+    fi
+    generated=$(openssl rand -base64 64 | tr -d '\r\n')
+    if grep -q "^${key}=" .env; then
+        sed -i "s|^${key}=.*|${key}=${generated}|" .env
+    else
+        printf '\n%s=%s\n' "$key" "$generated" >> .env
+    fi
+}
+ensure_secret JWT_SECRET
+ensure_secret INVENTORY_SERVICE_TOKEN
 
-echo ""
-echo "✅ All images pulled successfully!"
-echo ""
+# 필수 환경 변수를 이미지 다운로드·컨테이너 변경 전에 확인한다.
+docker compose config --quiet
+for service in "${SERVICES[@]}"; do
+    echo "📥 Pull: $service"
+    docker pull "$DOCKER_USERNAME/$service:latest"
+done
 
-# Make init script executable
-chmod +x scripts/init-redis-cluster.sh
+# 새 볼륨과 기존 볼륨 모두 지원하며 기존 DB·데이터는 유지한다.
+docker compose up -d postgres kafka redis-node-{1..6}
+postgres_attempts=0
+until docker compose exec -T postgres pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do
+    postgres_attempts=$((postgres_attempts + 1))
+    if (( postgres_attempts >= 30 )); then
+        echo "❌ PostgreSQL이 준비되지 않았습니다. docker compose logs postgres를 확인하세요." >&2
+        exit 1
+    fi
+    sleep 2
+done
+docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+SELECT 'CREATE DATABASE inventory_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'inventory_service')\gexec
+SQL
+bash scripts/init-redis-cluster.sh
 
-# Start all services
-echo "🚀 Starting all containers..."
-docker-compose up -d
-
-echo ""
-echo "⏳ Waiting for infrastructure to be ready..."
-sleep 15
-
-# Initialize Redis Cluster
-echo ""
-echo "🔧 Initializing Redis Cluster..."
-./scripts/init-redis-cluster.sh
-
-echo ""
-echo "=========================================="
-echo "✅ All services started successfully!"
-echo ""
-echo "📊 Service URLs:"
-echo "  - API (Nginx):        http://localhost:80"
-echo "  - PostgreSQL:         localhost:5432"
-echo "  - Redis Cluster:      localhost:7001-7006"
-echo "  - Kafka:              localhost:9092"
-echo ""
-echo "📝 Useful Commands:"
-echo "  - Check status: docker-compose ps"
-echo "  - View logs:    docker-compose logs -f [service-name]"
-echo "  - Stop all:     docker-compose down"
-echo ""
-echo "🔐 Security Note:"
-echo "  - JWT secret auto-generated and saved in .env"
-echo "  - Configure Telegram via API: POST /telegram/register"
-echo ""
+docker compose up -d --no-build
+docker compose ps
+echo "✅ 재고 서비스를 포함한 전체 컨테이너 기동 요청 완료"
+echo "관리자 화면: http://localhost/api/inventory/admin/index.html"
+echo "로그 확인: docker compose logs -f inventory-service order-service"

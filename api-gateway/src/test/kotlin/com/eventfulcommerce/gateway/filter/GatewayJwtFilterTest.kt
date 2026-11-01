@@ -37,6 +37,23 @@ class GatewayJwtFilterTest {
     }
 
     @Test
+    fun `관리자 화면은 정확한 정적 GET만 공개한다`() {
+        for (path in listOf("/api/inventory/admin/index.html","/api/inventory/admin/app.js","/api/inventory/admin/styles.css")) {
+            val response=MockHttpServletResponse()
+            filter.doFilter(MockHttpServletRequest("GET",path),response,MockFilterChain())
+            assertEquals(200,response.status)
+            val blocked=MockHttpServletResponse()
+            filter.doFilter(MockHttpServletRequest("POST",path),blocked,MockFilterChain())
+            assertEquals(401,blocked.status)
+        }
+        for (path in listOf("/api/inventory/counts","/api/inventory/admin/index.html/child","/api/inventory/admin/unknown")) {
+            val response=MockHttpServletResponse()
+            filter.doFilter(MockHttpServletRequest("GET",path),response,MockFilterChain())
+            assertEquals(401,response.status)
+        }
+    }
+
+    @Test
     fun `public path는 토큰 없이 통과한다`() {
         val request = MockHttpServletRequest("POST", "/api/auth/login")
         val response = MockHttpServletResponse()

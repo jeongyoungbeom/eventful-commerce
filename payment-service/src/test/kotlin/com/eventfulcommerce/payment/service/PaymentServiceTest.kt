@@ -71,6 +71,25 @@ class PaymentServiceTest {
         )
     }
 
+    @Test fun `직매입 예약과 환불 이벤트는 입점 결제로 우회하지 않는다`() {
+        val base = orderReservedPayload()
+        val direct = base.copy(sellerOrders = base.sellerOrders.map { it.copy(
+            sellerId = com.eventfulcommerce.common.SalesType.OFFICIAL_SELLER_ID,
+            salesType = com.eventfulcommerce.common.SalesType.DIRECT_PURCHASE) })
+        assertThrows(IllegalArgumentException::class.java) {
+            paymentService.handleOrderCreated(orderReservedMessage(UUID.randomUUID(), direct))
+        }
+        val canceled = orderCanceledPayload(base.orderId, base.userId, 1_000)
+        val directCancel = canceled.copy(canceledSellerOrders = canceled.canceledSellerOrders.map { it.copy(
+            sellerId = com.eventfulcommerce.common.SalesType.OFFICIAL_SELLER_ID,
+            salesType = com.eventfulcommerce.common.SalesType.DIRECT_PURCHASE) })
+        assertThrows(IllegalArgumentException::class.java) {
+            paymentService.handleOrderCanceled(orderCanceledMessage(UUID.randomUUID(), directCancel))
+        }
+        verify(paymentRepository, never()).save(any())
+        verify(paymentRefundRepository, never()).save(any())
+    }
+
     @Test
     fun `ORDER_RESERVED 이벤트를 받으면 PAYMENT_RESERVED 결제 레코드를 생성한다`() {
         val eventId = UUID.randomUUID()

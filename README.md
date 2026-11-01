@@ -156,9 +156,12 @@ MSA로 전환하면서 필연적으로 마주치는 세 가지 문제를 직접 
 | **product-service** | 8086 | 상품 등록/수정/삭제 (SELLER 전용) |
 | **order-service** | 8081 | 다상품 주문, SellerOrder, 주문/부분취소, Redis 재고 예약, ProductReadModel |
 | **payment-service** | 8082 | 결제 레코드 관리, PG 웹훅 처리, 환불 이벤트 발행 |
-| **shipping-service** | 8083 | SellerOrder별 배송 생성 및 상태 처리 |
+| **shipping-service** | 8083 | 입점 SellerOrder별 배송·직매입 출고 지시별 배송 |
 | **notification-service** | 8084 | Kafka 이벤트 수신, Telegram 알림 전송 |
+| **inventory-service** | 8088 | 직매입 입고·예약/할당·출고·반품·창고 이동·실사/대사·관리자 화면 (S8 리뷰 반영 완료) |
 | **settlement-service** | 8087 | SellerOrder별 정산 생성, 환불 차감, Spring Batch 일별 확정 |
+
+직매입 재고 API·인증·수량 규칙과 로컬 실행은 [S2 재고 서비스 가이드](docs/inventory-service-s2.md)를 참고합니다. 예약·FEFO·해제·만료·할당 및 서버 간 인증은 [S3 예약 계약](docs/inventory-reservations-s3.md)을 참고합니다. 혼합 주문의 부분 성공·미확인 복구·고객 확인은 [S4 혼합 주문 계약](docs/mixed-orders-s4.md)을, 확인 후 결제·할당·품목 취소/환불과 정산 분기는 [S5 결제 계약](docs/mixed-payments-s5.md)을 참고합니다. S5는 리뷰 반영까지 완료됐습니다. 창고 작업·반품 API와 실제 Kafka 전체 구매 단일 명령은 [S6 출고·반품 가이드](docs/warehouse-fulfillment-s6.md)를 참고합니다. S6는 리뷰 반영까지 완료됐습니다. 창고 이동·부분 도착·미도착 복구는 [S7 이동 가이드](docs/warehouse-transfers-s7.md)를 참고합니다. S7은 독립 리뷰까지 완료됐습니다. 실사·대사·미완료 작업과 관리자 화면(`/api/inventory/admin/index.html`)은 [S8 운영 가이드](docs/stock-counts-admin-s8.md)를 참고합니다. S8은 독립 리뷰의 수량 입력 검증 결함 반영까지 완료됐으며 S1~S8 확장 계획을 완료했습니다. 실사 API의 수량은 필수 비음수 JSON 정수입니다. 실제 브라우저·S7/S8 포함 전체 구매 실행·외부 연동·운영 적용의 미검증 범위는 S8 가이드를 따릅니다. 신규 재고 서비스는 모든 프로필에서 Flyway와 Hibernate validate를 사용합니다.
 
 공통 모듈: `common-auth` (JWT 공통), `common-outbox` (Outbox Publisher + 이벤트 Payload), `common-idempotency` (멱등성 처리)
 
@@ -374,8 +377,11 @@ TELEGRAM_BOT_USERNAME=your_bot_username
 # 소스 변경 시: 빌드 & Docker Hub 푸시
 ./build-and-push.sh
 
-# 전체 시스템 기동
+# 재고 포함 전체 9개 이미지 Pull & 기동 (필요한 재고 내부 토큰/DB 준비)
 ./pull-and-start.sh
+
+# 한 번에 빌드·푸시·전체 기동
+bash ./build-and-push.sh && bash ./pull-and-start.sh
 
 # 헬스 체크
 curl http://localhost/actuator/health  # Nginx → api-gateway
@@ -388,7 +394,7 @@ docker compose exec order-service curl -s http://localhost:8081/actuator/health
 ./stop-all.sh
 ```
 
-> 상품 등록 시 Redis 재고가 자동 초기화됩니다. 별도 초기화 스크립트는 필요 없습니다.
+> 입점 상품 등록 시 Redis 재고가 자동 초기화됩니다. 직매입 재고는 inventory-service가 관리합니다. 최초 Docker Hub 로그인과 `.env`의 Gmail 설정이 필요하며, 누락된 JWT/재고 내부 토큰만 자동 생성합니다. 기존 DB·볼륨은 삭제하지 않습니다. 자세한 실행·스키마 경계는 [Docker Hub 가이드](DOCKER-HUB-GUIDE.md)를 따릅니다.
 
 ---
 

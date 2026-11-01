@@ -31,6 +31,9 @@ dependencies {
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
 
     testImplementation(project(":shipping-service"))
+    testImplementation(project(":inventory-service"))
+    testImplementation(project(":payment-service"))
+    testImplementation(project(":settlement-service"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("org.testcontainers:junit-jupiter")

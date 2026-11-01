@@ -106,6 +106,37 @@ class OrderReservationPostgresIntegrationTest {
         redis.execute { connection -> connection.serverCommands().flushAll(); null }
     }
 
+    @Test fun `S1 판매 snapshot SQL은 주체 유형과 비용 배분 제약을 적용한다`() {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { sql ->
+                    sql.execute("CREATE SCHEMA s1_order_contract")
+                    sql.execute("SET LOCAL search_path TO s1_order_contract")
+                    sql.execute("CREATE TABLE product_read_model (seller_id UUID NOT NULL)")
+                    sql.execute("CREATE TABLE seller_orders (seller_id UUID NOT NULL)")
+                    sql.execute("CREATE TABLE order_items (id UUID PRIMARY KEY)")
+                    sql.execute(javaClass.classLoader.getResourceAsStream("db/migration/V6__sales_snapshot.sql")!!.bufferedReader().readText())
+                    for (table in listOf("product_read_model", "seller_orders")) {
+                        sql.execute("INSERT INTO $table VALUES ('${UUID.randomUUID()}', 'MARKETPLACE')")
+                        sql.execute("INSERT INTO $table VALUES ('${SalesType.OFFICIAL_SELLER_ID}', 'DIRECT_PURCHASE')")
+                        val point = connection.setSavepoint()
+                        assertThrows(java.sql.SQLException::class.java) {
+                            sql.execute("INSERT INTO $table VALUES ('${SalesType.OFFICIAL_SELLER_ID}', 'MARKETPLACE')")
+                        }
+                        connection.rollback(point)
+                    }
+                    val point = connection.setSavepoint()
+                    assertThrows(java.sql.SQLException::class.java) {
+                        sql.execute("INSERT INTO order_items VALUES ('${UUID.randomUUID()}', -1)")
+                    }
+                    connection.rollback(point)
+                    sql.execute("INSERT INTO order_items VALUES ('${UUID.randomUUID()}', 0)")
+                }
+            } finally { connection.rollback() }
+        }
+    }
+
     @Test
     fun `결제 전 일부 취소 후 남은 판매자만 확정하고 실제 배송 소비자도 그 대상만 생성한다`() {
         val order = reservedOrder()
@@ -582,7 +613,7 @@ class OrderReservationPostgresIntegrationTest {
         }
         if (state == ShippingStatus.FAILED) {
             val failed = events("SHIPPING_FAILED").single()
-            ShippingEventsConsumer(mapper, service).receive(mapper.writeValueAsString(message(failed)))
+            ShippingEventsConsumer(mapper, service, io.mockk.mockk(relaxed = true)).receive(mapper.writeValueAsString(message(failed)))
         } else assertEquals(OrderCancellationOutcome.PENDING, service.cancelOrder(order.id, order.userId))
         deliverRequests()
         deliverDecisions()
@@ -810,7 +841,7 @@ class OrderReservationPostgresIntegrationTest {
         val order = confirmedWithShipping(1)
         failure.fail(shipments.findAll().single().id, IllegalStateException("준비 중 오류"))
         val failed = events("SHIPPING_FAILED").single()
-        ShippingEventsConsumer(mapper, service).receive(mapper.writeValueAsString(message(failed)))
+        ShippingEventsConsumer(mapper, service, io.mockk.mockk(relaxed = true)).receive(mapper.writeValueAsString(message(failed)))
         assertEquals(CancellationStatus.PENDING, current(order).sellerOrders.single().cancellationStatus)
         assertEquals(0, sagas.findByOrderId(order.id)!!.expectedRefundCount)
         assertTrue(events("ORDER_CANCELED").isEmpty())
@@ -899,7 +930,7 @@ class OrderReservationPostgresIntegrationTest {
 
     private fun deliverDecisions() = events("SHIPPING_CANCELLATION_DECIDED").forEach { consumeDecision(it) }
     private fun consumeDecision(event: OutboxEvent, eventId: UUID = event.id) {
-        ShippingEventsConsumer(mapper, service).receive(mapper.writeValueAsString(message(event).copy(eventId = eventId)))
+        ShippingEventsConsumer(mapper, service, io.mockk.mockk(relaxed = true)).receive(mapper.writeValueAsString(message(event).copy(eventId = eventId)))
     }
     private fun message(event: OutboxEvent) = OutboxEventMessage(event.id, event.aggregateType,
         event.aggregateId, event.eventType, event.createdAt, event.payload)

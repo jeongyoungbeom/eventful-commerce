@@ -14,6 +14,19 @@ if expirationType ~= 'none' and expirationType ~= 'zset' then
 end
 
 if redis.call('EXISTS', KEYS[2]) == 0 then
+    -- S4는 생성 전 해제도 원본과 함께 종결시켜 늦은 예약을 막는다.
+    if ARGV[6] ~= nil then
+        local quantity = tonumber(ARGV[1])
+        local retention = tonumber(ARGV[3])
+        local expiry = tonumber(ARGV[7])
+        if quantity == nil or quantity <= 0 or retention == nil or retention <= 0 or expiry == nil then return -1 end
+        redis.call('HSET', KEYS[2], 'orderId', ARGV[6], 'productId', ARGV[4],
+            'reservationId', ARGV[2], 'quantity', ARGV[1], 'expiresAtEpochMilli', ARGV[7],
+            'status', 'RELEASED', 'terminalAtEpochMilli', ARGV[5])
+        redis.call('PEXPIRE', KEYS[2], retention)
+        redis.call('ZREM', KEYS[4], ARGV[2])
+        return 1
+    end
     redis.call('ZREM', KEYS[4], ARGV[2])
     return 0
 end
@@ -31,6 +44,8 @@ if holdType == 'hash' then
     status = redis.call('HGET', KEYS[2], 'status') or 'RESERVED'
     quantity = tonumber(redis.call('HGET', KEYS[2], 'quantity'))
 
+    if ARGV[6] ~= nil and (redis.call('HGET', KEYS[2], 'orderId') ~= ARGV[6]
+        or redis.call('HGET', KEYS[2], 'expiresAtEpochMilli') ~= ARGV[7]) then return -1 end
     local storedReservationId = redis.call('HGET', KEYS[2], 'reservationId')
     local storedProductId = redis.call('HGET', KEYS[2], 'productId')
     if storedReservationId ~= nil and storedReservationId ~= ARGV[2] then

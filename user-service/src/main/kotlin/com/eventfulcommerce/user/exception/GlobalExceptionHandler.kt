@@ -26,6 +26,10 @@ class GlobalExceptionHandler {
         )
     }
 
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException::class)
+    fun handleUnreadableRequest(ex: org.springframework.http.converter.HttpMessageNotReadableException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.badRequest().body(ErrorResponse(code = "INVALID_JSON", message = "요청 JSON 형식과 필수 값을 확인해 주세요"))
+
     @ExceptionHandler(DuplicateEmailException::class)
     fun handleDuplicateEmail(ex: DuplicateEmailException): ResponseEntity<ErrorResponse> {
         logger.warn { ex.message }

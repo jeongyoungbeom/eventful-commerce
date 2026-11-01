@@ -45,3 +45,8 @@ scrape_configs:
     metrics_path: "/actuator/prometheus"
     static_configs:
       - targets: ["settlement-service:8087"]
+
+  - job_name: "inventory-service"
+    metrics_path: "/actuator/prometheus"
+    static_configs:
+      - targets: ["inventory-service:8088"]

@@ -39,6 +39,17 @@ class PaymentEventsConsumerTest {
         consumer = PaymentEventsConsumer(settlementService, idempotencyHandler, objectMapper)
     }
 
+    @Test fun `직매입 결제와 환불은 입점 정산에 유입되지 않는다`() {
+        val direct = PaymentCompletedSellerPayload(UUID.randomUUID(), com.eventfulcommerce.common.SalesType.OFFICIAL_SELLER_ID,
+            1_000, 0.0, 0, 0, com.eventfulcommerce.common.SalesType.DIRECT_PURCHASE)
+        consumer.consume(message("PAYMENT_COMPLETED", PaymentCompletedPayload(UUID.randomUUID(), UUID.randomUUID(),
+            UUID.randomUUID(), 1_000, listOf(direct), Instant.now())))
+        consumer.consume(message("PAYMENT_REFUNDED", PaymentRefundedPayload(UUID.randomUUID(), UUID.randomUUID(),
+            UUID.randomUUID(), direct.sellerOrderId, direct.sellerId, 1_000, "직매입 취소", Instant.now(), direct.salesType)))
+        verify(exactly = 0) { settlementService.createSettlement(any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { settlementService.applyRefund(any()) }
+    }
+
     @Test
     fun `PAYMENT_COMPLETED 이벤트는 판매자 주문별 정산 생성을 위임한다`() {
         val sellerOrder = PaymentCompletedSellerPayload(

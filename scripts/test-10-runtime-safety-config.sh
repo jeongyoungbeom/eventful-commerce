@@ -47,6 +47,15 @@ for service in "${SERVICES[@]}"; do
   assert_file_contains "$build_file" 'org\.flywaydb:flyway-core' "$service Flyway core 의존성이 없습니다"
   assert_file_contains "$build_file" 'org\.flywaydb:flyway-database-postgresql' "$service PostgreSQL Flyway 의존성이 없습니다"
 done
+echo "[단계] 신규 재고 서비스는 모든 프로필에서 Flyway·validate를 유지하는지 검증"
+assert_file_contains inventory-service/src/main/resources/application.yml 'ddl-auto:[[:space:]]*validate' "inventory-service 기본 validate가 없습니다"
+assert_file_contains inventory-service/src/main/resources/application.yml 'enabled:[[:space:]]*true' "inventory-service Flyway 활성화가 없습니다"
+assert_file_contains inventory-service/src/main/resources/application.yml 'clean-disabled:[[:space:]]*true' "inventory-service Flyway clean 금지가 없습니다"
+if rg -q 'ddl-auto:[[:space:]]*(update|create)|enabled:[[:space:]]*false' inventory-service/src/main/resources/application-docker.yml; then
+  fail_test "inventory-service Docker 프로필이 스키마 안전 정책을 덮어씁니다"
+fi
+assert_file_contains inventory-service/src/main/resources/db/migration/V1__inventory_schema.sql 'CREATE TABLE inventory_stock_balance' "재고 기준선이 없습니다"
+assert_file_contains inventory-service/build.gradle.kts 'org\.flywaydb:flyway-database-postgresql' "inventory-service PostgreSQL Flyway 의존성이 없습니다"
 assert_file_contains user-service/src/main/resources/application-docker.yml 'jdbc:postgresql://postgres:5432/user_service' "user-service Docker DB 주소가 컨테이너 호스트를 사용하지 않습니다"
 assert_file_contains user-service/src/main/resources/application-docker.yml 'redis-node-1:7001' "user-service Docker Redis 클러스터 주소가 없습니다"
 
@@ -76,7 +85,7 @@ assert_file_contains monitoring/prometheus/alerts.yml 'eventful_dlt_events\{stat
 
 BASELINE_COUNT=$(rg --files | awk '/\/db\/migration\/V0__baseline\.sql$/ {count++} END {print count+0}')
 RESULT_DATA_JSON=$(jq -n \
-  --argjson checkedServices "${#SERVICES[@]}" \
+  --argjson checkedServices "$((${#SERVICES[@]} + 1))" \
   --argjson baselineCount "$BASELINE_COUNT" \
   '{checkedServices:$checkedServices,baselineCount:$baselineCount,kafkaListeners:"INTERNAL+EXTERNAL",seedProfiles:["dev","local"]}')
-pass_test "7개 DB 서비스의 프로필 안전성, Kafka 영속성, Outbox/DLT/배송 복구 구성을 검증했습니다. V0 baseline 수=$BASELINE_COUNT"
+pass_test "8개 DB 서비스의 프로필 안전성, Kafka 영속성, Outbox/DLT/배송 복구 구성을 검증했습니다. V0 baseline 수=$BASELINE_COUNT"

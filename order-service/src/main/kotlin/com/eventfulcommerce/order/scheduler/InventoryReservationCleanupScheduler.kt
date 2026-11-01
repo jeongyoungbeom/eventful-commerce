@@ -111,6 +111,7 @@ class InventoryReservationCleanupScheduler(
             return
         }
 
+        if (order.mixedOrder) return // 품목별 확정/취소는 혼합 복구가 소유한다.
         when (order.status) {
             OrdersStatus.ORDER_CONFIRMED -> requireSuccessful(
                 inventoryReservationService.commit(productId, reservationId, metadata.quantity),
@@ -125,6 +126,10 @@ class InventoryReservationCleanupScheduler(
                 "release",
                 metadata
             )
+
+            OrdersStatus.ORDER_PROCESSING,
+            OrdersStatus.ORDER_AWAITING_CONFIRMATION,
+            OrdersStatus.ORDER_AWAITING_PAYMENT -> Unit // 혼합 주문은 영속 복구 스케줄러가 담당한다.
 
             OrdersStatus.ORDER_RESERVED,
             OrdersStatus.ORDER_PARTIALLY_CANCELED -> {

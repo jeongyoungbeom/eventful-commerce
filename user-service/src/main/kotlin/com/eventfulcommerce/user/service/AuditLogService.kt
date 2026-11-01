@@ -1,5 +1,6 @@
 package com.eventfulcommerce.user.service
 
+import com.eventfulcommerce.user.web.clientIp
 import com.eventfulcommerce.user.domain.entity.AuditLog
 import com.eventfulcommerce.user.domain.repository.AuditLogRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -30,7 +31,7 @@ class AuditLogService(
         val auditLog = AuditLog(
             userId = userId,
             action = action,
-            ipAddress = request?.let { getClientIP(it) },
+            ipAddress = request?.let { clientIp(it) },
             userAgent = request?.getHeader("User-Agent"),
             success = success,
             failureReason = failureReason
@@ -79,33 +80,4 @@ class AuditLogService(
         log(userId, "PASSWORD_CHANGE", success = true, request = request)
     }
     
-    /**
-     * 클라이언트 IP 추출
-     */
-    private fun getClientIP(request: HttpServletRequest): String {
-        // Proxy를 거친 경우 실제 IP 추출
-        val headers = listOf(
-            "X-Forwarded-For",
-            "Proxy-Client-IP",
-            "WL-Proxy-Client-IP",
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_FORWARDED",
-            "HTTP_X_CLUSTER_CLIENT_IP",
-            "HTTP_CLIENT_IP",
-            "HTTP_FORWARDED_FOR",
-            "HTTP_FORWARDED",
-            "HTTP_VIA",
-            "REMOTE_ADDR"
-        )
-        
-        for (header in headers) {
-            val ip = request.getHeader(header)
-            if (!ip.isNullOrBlank() && ip != "unknown") {
-                // 여러 IP가 있는 경우 첫 번째 IP 사용
-                return ip.split(",")[0].trim()
-            }
-        }
-        
-        return request.remoteAddr ?: "unknown"
-    }
 }

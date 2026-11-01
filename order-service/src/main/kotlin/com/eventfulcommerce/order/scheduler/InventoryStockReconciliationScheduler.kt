@@ -44,6 +44,7 @@ class InventoryStockReconciliationScheduler(
         }
         nextPage = if (products.hasNext()) nextPage + 1 else 0
         val repairEvents = products.content.mapNotNull { product ->
+            if (product.salesType != com.eventfulcommerce.common.SalesType.MARKETPLACE) return@mapNotNull null
             val snapshot = inventoryReservationService.getStockSnapshot(product.productId.toString())
             val availableStock = snapshot.availableStock ?: run {
                 logger.warn { "Redis inventory key is missing during reconciliation: productId=${product.productId}" }

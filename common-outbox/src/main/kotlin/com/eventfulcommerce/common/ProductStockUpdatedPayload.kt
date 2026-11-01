@@ -11,5 +11,12 @@ data class ProductStockUpdatedPayload(
      * True when the source was an Order-side Redis transition. Order service still refreshes
      * its read model but must not apply the same delta to Redis a second time.
      */
-    val redisAlreadyAdjusted: Boolean = false
-)
+    val redisAlreadyAdjusted: Boolean = false,
+    val salesType: SalesType = SalesType.MARKETPLACE,
+    val schemaVersion: Int = 1
+) {
+    init {
+        require(schemaVersion in 1..2) { "Unsupported stock schema version" }
+        salesType.validateSeller(sellerId)
+    }
+}

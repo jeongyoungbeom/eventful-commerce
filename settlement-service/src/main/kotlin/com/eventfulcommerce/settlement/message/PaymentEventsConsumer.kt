@@ -34,7 +34,7 @@ class PaymentEventsConsumer(
             when (eventType) {
                 "PAYMENT_COMPLETED" -> {
                     val payload = objectMapper.readValue(event["payload"].asText(), PaymentCompletedPayload::class.java)
-                    payload.sellerOrders.forEach { sellerOrder ->
+                    payload.sellerOrders.filter { it.salesType == com.eventfulcommerce.common.SalesType.MARKETPLACE }.forEach { sellerOrder ->
                         settlementService.createSettlement(
                             paymentId = payload.paymentId,
                             orderId = payload.orderId,
@@ -50,7 +50,7 @@ class PaymentEventsConsumer(
                 }
                 "PAYMENT_REFUNDED" -> {
                     val payload = objectMapper.readValue(event["payload"].asText(), PaymentRefundedPayload::class.java)
-                    settlementService.applyRefund(payload)
+                    if (payload.salesType == com.eventfulcommerce.common.SalesType.MARKETPLACE) settlementService.applyRefund(payload)
                     logger.info { "정산 환불 차감 완료: refundId=${payload.refundId}" }
                 }
             }

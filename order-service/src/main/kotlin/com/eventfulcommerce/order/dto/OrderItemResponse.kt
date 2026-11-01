@@ -13,5 +13,9 @@ data class OrderItemResponse(
     val unitPrice: Long,
     val totalAmount: Long,
     val reservationId: UUID,
-    val status: OrderItemStatus
+    val status: OrderItemStatus,
+    val skuId: UUID = productId,
+    val deliveryFeeAllocation: Long = 0,
+    val warehouseId: UUID? = null,
+    val cancellationStatus: com.eventfulcommerce.order.domain.entity.CancellationStatus = com.eventfulcommerce.order.domain.entity.CancellationStatus.NONE
 )

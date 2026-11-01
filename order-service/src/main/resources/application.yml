@@ -56,7 +56,7 @@ outbox:
   polling-ms: 200
 
 dlt:
-  topics: payment-events.DLT,product-events.DLT,shipping-events.DLT
+  topics: payment-events.DLT,product-events.DLT,shipping-events.DLT,direct-inventory-events.DLT
   operations:
     enabled: ${DLT_OPERATIONS_ENABLED:false}
     token: ${DLT_OPERATIONS_TOKEN:}
@@ -66,6 +66,13 @@ jwt:
 
 order:
   commission-rate: 0.1
+  direct-inventory:
+    base-url: ${INVENTORY_SERVICE_URL:http://localhost:8088}
+    token: ${INVENTORY_SERVICE_TOKEN:}
+    delivery-fee: ${DIRECT_PURCHASE_DELIVERY_FEE:0}
+    free-delivery-threshold: ${DIRECT_PURCHASE_FREE_DELIVERY_THRESHOLD:9223372036854775807}
+    recovery-enabled: true
+    recovery-delay-ms: 5000
   idempotency:
     retention-seconds: 86400
     cleanup-fixed-delay-ms: 3600000

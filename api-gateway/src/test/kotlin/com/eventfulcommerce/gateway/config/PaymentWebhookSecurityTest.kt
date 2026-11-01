@@ -27,6 +27,42 @@ import java.util.UUID
 
 class PaymentWebhookSecurityTest {
     @Test
+    fun `관리자 화면 GET 셸만 SecurityFilterChain을 통과한다`() {
+        WebApplicationContextRunner().withUserConfiguration(PaymentGatewaySecurityConfiguration::class.java).run { context ->
+            SecurityContextHolder.clearContext()
+            val mvc=MockMvcBuilders.webAppContextSetup(context.sourceApplicationContext)
+                .addFilters<org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder>(context.getBean("springSecurityFilterChain",Filter::class.java)).build()
+            for(path in listOf("/api/inventory/admin/index.html","/api/inventory/admin/app.js","/api/inventory/admin/styles.css")) {
+                mvc.perform(get(path)).andExpect(status().isOk)
+                mvc.perform(post(path)).andExpect(status().isUnauthorized)
+            }
+            mvc.perform(get("/api/inventory/counts")).andExpect(status().isUnauthorized)
+            mvc.perform(get("/api/inventory/admin/index.html/child")).andExpect(status().isUnauthorized)
+            SecurityContextHolder.clearContext()
+        }
+    }
+
+    @Test
+    fun `공식 주체 관리 경로는 access JWT가 필요하고 역할 헤더를 위조할 수 없다`() {
+        WebApplicationContextRunner().withUserConfiguration(PaymentGatewaySecurityConfiguration::class.java).run { context ->
+            SecurityContextHolder.clearContext()
+            val mvc = MockMvcBuilders.webAppContextSetup(context.sourceApplicationContext)
+                .addFilters<org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder>(context.getBean("springSecurityFilterChain", Filter::class.java)).build()
+            mvc.perform(get("/api/products/official/seller")).andExpect(status().isUnauthorized)
+            mvc.perform(put("/api/products/official/seller").header("X-User-Id", UUID.randomUUID())
+                .header("X-User-Role", "ADMIN")).andExpect(status().isUnauthorized)
+            mvc.perform(post("/api/products/official")).andExpect(status().isUnauthorized)
+            val jwt = context.getBean(JwtTokenProvider::class.java)
+            mvc.perform(put("/api/products/official/seller").header(HttpHeaders.AUTHORIZATION,
+                "Bearer ${jwt.createRefreshToken(UUID.randomUUID(), UserRole.ADMIN)}")).andExpect(status().isUnauthorized)
+            mvc.perform(put("/api/products/official/seller").header(HttpHeaders.AUTHORIZATION,
+                "Bearer ${jwt.createAccessToken(UUID.randomUUID(), UserRole.SELLER)}")
+                .header("X-User-Role", "ADMIN")).andExpect(status().isOk).andExpect(content().string("SELLER"))
+            SecurityContextHolder.clearContext()
+        }
+    }
+
+    @Test
     fun `정확한 POST 실제 웹훅만 JWT 예외이며 시뮬레이션에는 access JWT가 필요하다`() {
         WebApplicationContextRunner().withUserConfiguration(PaymentGatewaySecurityConfiguration::class.java).run { context ->
             SecurityContextHolder.clearContext()
@@ -66,6 +102,9 @@ class PaymentGatewaySecurityConfiguration {
 
 @RestController
 class PaymentGatewayProbeController {
+    @GetMapping("/api/inventory/admin/index.html","/api/inventory/admin/app.js","/api/inventory/admin/styles.css") fun adminShell()="static shell"
+
+    @PutMapping("/api/products/official/seller") fun provision(@RequestHeader("X-User-Role") role: String) = role
     @PostMapping("/api/payments/webhook") fun webhook() = "PG route"
     @PostMapping("/api/payments/simulation/webhook")
     fun simulation(@RequestHeader("X-Payment-Simulation-Token") token: String) = token

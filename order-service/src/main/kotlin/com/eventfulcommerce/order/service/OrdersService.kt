@@ -132,6 +132,11 @@ class OrdersService(
                 return@mapNotNull null
             }
 
+            if (product.salesType != SalesType.MARKETPLACE) {
+                failedItems.add(FailedOrderItemResponse(product.productId, "DIRECT_PURCHASE_NOT_READY", itemRequest.quantity, 0))
+                return@mapNotNull null
+            }
+
             val requestedReservationId = UUID.randomUUID()
             val reservationId = inventoryReservationService.reserve(
                 productId = product.productId.toString(),
@@ -156,6 +161,7 @@ class OrdersService(
                     productId = product.productId,
                     productName = product.name,
                     sellerId = product.sellerId,
+                    salesType = product.salesType,
                     quantity = itemRequest.quantity,
                     unitPrice = product.price,
                     totalAmount = product.price * itemRequest.quantity,
@@ -191,6 +197,7 @@ class OrdersService(
             val sellerOrder = SellerOrder(
                 order = order,
                 sellerId = sellerId,
+                salesType = items.first().salesType,
                 itemTotalAmount = itemTotalAmount,
                 deliveryFee = deliveryFee,
                 paymentAmount = itemTotalAmount + deliveryFee,
@@ -278,7 +285,7 @@ class OrdersService(
                 userId = order.userId,
                 totalAmount = targets.sumOf { it.paymentAmount },
                 sellerOrders = targets.map {
-                    OrderConfirmedSellerPayload(it.id, it.sellerId, it.paymentAmount)
+                    OrderConfirmedSellerPayload(it.id, it.sellerId, it.paymentAmount, it.salesType)
                 },
                 confirmedAt = Instant.now()
             )
@@ -311,7 +318,7 @@ class OrdersService(
         idempotencyHandler.executeIdempotent(value.eventId) {
             val payload = objectMapper.readValue(value.payload, ShippingCancellationDecidedPayload::class.java)
             val reason = orderCancelExecutor.completeShippingCancellation(payload)
-            if (reason == "SAGA_SHIPPING_FAILED") {
+            if (reason == "SAGA_SHIPPING_FAILED" && ordersRepository.findById(payload.orderId).orElse(null)?.mixedOrder != true) {
                 orderSagaService.requestCompensation(payload.orderId, IllegalStateException(reason))
                 orderSagaService.markRefundPending(payload.orderId, 1)
             }
@@ -322,6 +329,10 @@ class OrdersService(
     fun handleShippingFailed(value: OutboxEventMessage) {
         idempotencyHandler.executeIdempotent(value.eventId) {
             val payload = objectMapper.readValue(value.payload, ShippingFailedPayload::class.java)
+            if (ordersRepository.findById(payload.orderId).orElse(null)?.mixedOrder == true) {
+                check(orderCancelService.cancelSellerOrderForEvent(payload.orderId, payload.sellerOrderId, "SAGA_SHIPPING_FAILED") != OrderCancellationOutcome.LOCK_UNAVAILABLE)
+                return@executeIdempotent
+            }
             when (
                 orderCancelService.cancelSellerOrderForEvent(
                     payload.orderId,
@@ -435,6 +446,7 @@ class OrdersService(
                 OrderReservedSellerPayload(
                     sellerOrderId = sellerOrder.id,
                     sellerId = sellerOrder.sellerId,
+                    salesType = sellerOrder.salesType,
                     itemTotalAmount = sellerOrder.itemTotalAmount,
                     deliveryFee = sellerOrder.deliveryFee,
                     paymentAmount = sellerOrder.paymentAmount,
@@ -449,7 +461,8 @@ class OrdersService(
                             quantity = item.quantity,
                             unitPrice = item.unitPrice,
                             totalAmount = item.totalAmount,
-                            reservationId = item.reservationId
+                            reservationId = item.reservationId,
+                            deliveryFeeAllocation = item.deliveryFeeAllocation
                         )
                     }
                 )
@@ -501,6 +514,7 @@ private data class ReservedItem(
     val productId: UUID,
     val productName: String,
     val sellerId: UUID,
+    val salesType: SalesType,
     val quantity: Int,
     val unitPrice: Long,
     val totalAmount: Long,

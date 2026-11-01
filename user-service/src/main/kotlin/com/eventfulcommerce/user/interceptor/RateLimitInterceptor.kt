@@ -1,5 +1,6 @@
 package com.eventfulcommerce.user.interceptor
 
+import com.eventfulcommerce.user.web.clientIp
 import com.eventfulcommerce.user.service.RateLimitService
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -23,7 +24,7 @@ class RateLimitInterceptor(
         response: HttpServletResponse,
         handler: Any
     ): Boolean {
-        val ipAddress = getClientIP(request)
+        val ipAddress = clientIp(request)
         
         // Rate Limit 확인
         if (!rateLimitService.checkRateLimit(ipAddress)) {
@@ -50,31 +51,4 @@ class RateLimitInterceptor(
         return true
     }
     
-    /**
-     * 클라이언트 IP 추출
-     */
-    private fun getClientIP(request: HttpServletRequest): String {
-        val headers = listOf(
-            "X-Forwarded-For",
-            "Proxy-Client-IP",
-            "WL-Proxy-Client-IP",
-            "HTTP_X_FORWARDED_FOR",
-            "HTTP_X_FORWARDED",
-            "HTTP_X_CLUSTER_CLIENT_IP",
-            "HTTP_CLIENT_IP",
-            "HTTP_FORWARDED_FOR",
-            "HTTP_FORWARDED",
-            "HTTP_VIA",
-            "REMOTE_ADDR"
-        )
-        
-        for (header in headers) {
-            val ip = request.getHeader(header)
-            if (!ip.isNullOrBlank() && ip != "unknown") {
-                return ip.split(",")[0].trim()
-            }
-        }
-        
-        return request.remoteAddr ?: "unknown"
-    }
 }

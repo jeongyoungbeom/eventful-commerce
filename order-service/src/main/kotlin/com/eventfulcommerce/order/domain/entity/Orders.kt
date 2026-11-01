@@ -37,7 +37,10 @@ class Orders(
     val sellerOrders: MutableList<SellerOrder> = mutableListOf(),
 
     @Version
-    var version: Long = 0L
+    var version: Long = 0L,
+
+    @Column(nullable = false, updatable = false)
+    val mixedOrder: Boolean = false
 
 ) : BaseTimeEntity() {
 
@@ -61,7 +64,7 @@ class Orders(
         status = when {
             sellerOrders.isEmpty() -> OrdersStatus.ORDER_FAILED
             sellerOrders.all { it.status == SellerOrderStatus.CANCELED } -> OrdersStatus.ORDER_CANCELED
-            sellerOrders.any { it.status == SellerOrderStatus.CANCELED } -> OrdersStatus.ORDER_PARTIALLY_CANCELED
+            sellerOrders.any { it.status in setOf(SellerOrderStatus.CANCELED, SellerOrderStatus.PARTIALLY_CANCELED) } -> OrdersStatus.ORDER_PARTIALLY_CANCELED
             sellerOrders.all { it.status == SellerOrderStatus.CONFIRMED } -> OrdersStatus.ORDER_CONFIRMED
             else -> OrdersStatus.ORDER_RESERVED
         }

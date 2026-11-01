@@ -35,3 +35,5 @@ class OrderIdempotencyConflictException(
 class OrderIdempotencyInProgressException(
     val keyFingerprint: String
 ) : OrderException("Order request is still being completed.")
+
+class OrderCompositionConflictException : OrderException("현재 구성·금액·유효시간을 조회하고 다시 확인하세요.")

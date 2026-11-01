@@ -7,7 +7,7 @@ import java.util.UUID
 data class FailedOrderItemResponse(
     @field:Schema(description = "실패한 상품 ID")
     val productId: UUID,
-    @field:Schema(description = "실패 사유. INSUFFICIENT_STOCK 또는 PRODUCT_NOT_AVAILABLE", example = "INSUFFICIENT_STOCK")
+    @field:Schema(description = "실패 사유. INSUFFICIENT_STOCK, PRODUCT_NOT_AVAILABLE 또는 DIRECT_PURCHASE_NOT_READY", example = "INSUFFICIENT_STOCK")
     val reason: String,
     @field:Schema(description = "요청 수량", example = "3")
     val requestedQuantity: Int,

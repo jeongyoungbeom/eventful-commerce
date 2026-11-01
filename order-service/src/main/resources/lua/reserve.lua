@@ -70,6 +70,14 @@ if stock == nil or stock < 0 or holdCount == nil or holdCount < 0 then
     return -3
 end
 if stock < quantity then
+    -- 혼합 주문의 품절 결정도 종결 기록으로 남겨 동시 재요청이 나중에 성공하지 않게 한다.
+    if ARGV[6] ~= nil then
+        local retention = tonumber(ARGV[6])
+        if retention == nil or retention <= 0 then return -2 end
+        redis.call('HSET', KEYS[2], 'orderId', ARGV[1], 'productId', ARGV[2],
+            'reservationId', ARGV[3], 'quantity', ARGV[4], 'expiresAtEpochMilli', ARGV[5], 'status', 'RELEASED')
+        redis.call('PEXPIRE', KEYS[2], retention)
+    end
     return 0
 end
 

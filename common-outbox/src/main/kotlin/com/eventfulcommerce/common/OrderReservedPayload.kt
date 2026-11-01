@@ -13,7 +13,9 @@ data class OrderReservedPayload(
     val totalSettlementAmount: Long,
     val sellerOrders: List<OrderReservedSellerPayload>,
     val expiresAt: Instant?,
-    val createdAt: Instant
+    val createdAt: Instant,
+    val compositionVersion: Long? = null,
+    val confirmedVersion: Long? = null
 )
 
 data class OrderReservedSellerPayload(
@@ -25,8 +27,11 @@ data class OrderReservedSellerPayload(
     val commissionRate: Double,
     val commissionAmount: Long,
     val settlementAmount: Long,
-    val items: List<OrderReservedItemPayload>
-)
+    val items: List<OrderReservedItemPayload>,
+    val salesType: SalesType = SalesType.MARKETPLACE
+) {
+    init { salesType.validateSeller(sellerId) }
+}
 
 data class OrderReservedItemPayload(
     val orderItemId: UUID,
@@ -35,5 +40,12 @@ data class OrderReservedItemPayload(
     val quantity: Int,
     val unitPrice: Long,
     val totalAmount: Long,
-    val reservationId: UUID
-)
+    val reservationId: UUID,
+    val skuId: UUID = productId,
+    val deliveryFeeAllocation: Long = 0
+) {
+    init {
+        require(skuId == productId) { "상품과 SKU는 1:1이어야 합니다" }
+        require(deliveryFeeAllocation >= 0) { "배송비 배분은 음수일 수 없습니다" }
+    }
+}

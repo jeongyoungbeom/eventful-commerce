@@ -36,6 +36,7 @@ class SecurityConfig(
                         "/v3/api-docs/**",
                         "/api-docs/**"
                     ).permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/inventory/admin/index.html", "/api/inventory/admin/app.js", "/api/inventory/admin/styles.css").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/*").permitAll()
                     .anyRequest().authenticated()

@@ -40,7 +40,7 @@ outbox:
   polling-ms: 200
 
 dlt:
-  topics: order-events.DLT
+  topics: order-events.DLT,direct-inventory-events.DLT
   operations:
     enabled: ${DLT_OPERATIONS_ENABLED:false}
     token: ${DLT_OPERATIONS_TOKEN:}

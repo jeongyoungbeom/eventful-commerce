@@ -1,6 +1,7 @@
 package com.eventfulcommerce.product.domain.entity
 
 import com.eventfulcommerce.common.BaseTimeEntity
+import com.eventfulcommerce.common.SalesType
 import com.eventfulcommerce.product.domain.ProductCategory
 import com.eventfulcommerce.product.domain.ProductLabel
 import com.eventfulcommerce.product.domain.ProductStatus
@@ -12,7 +13,7 @@ import java.time.Instant
 @Entity
 @Table(name = "products")
 class Product(
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     val sellerId: UUID,
 
     @Column(nullable = false)
@@ -33,12 +34,24 @@ class Product(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    var status: ProductStatus = ProductStatus.ACTIVE
+    var status: ProductStatus = ProductStatus.ACTIVE,
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, updatable = false)
+    val salesType: SalesType = SalesType.MARKETPLACE
 ) : BaseTimeEntity() {
+    init {
+        salesType.validateSeller(sellerId)
+        require(salesType == SalesType.MARKETPLACE || stock == 0) { "직매입 재고는 재고 서비스에서 관리합니다" }
+    }
+
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     lateinit var id: UUID
+
+    @Column(nullable = false)
+    var informationVersion: Long = 0
 
     @Column(name = "inventory_snapshot_at")
     var inventorySnapshotAt: Instant? = null
@@ -59,6 +72,7 @@ class Product(
     var imageUrls: MutableList<String> = mutableListOf()
 
     fun update(name: String, description: String, price: Long, category: ProductCategory, labels: Set<ProductLabel>, imageUrls: List<String>?) {
+        this.informationVersion = Math.incrementExact(informationVersion)
         this.name = name
         this.description = description
         this.price = price
@@ -68,11 +82,13 @@ class Product(
     }
 
     fun adjustStock(delta: Int) {
+        check(salesType == SalesType.MARKETPLACE) { "직매입 재고는 재고 서비스에서 관리합니다" }
         require(stock + delta >= 0) { "재고는 0 미만이 될 수 없습니다" }
         this.stock += delta
     }
 
     fun replaceStock(stock: Int, snapshotAt: Instant) {
+        check(salesType == SalesType.MARKETPLACE) { "직매입 재고는 재고 서비스에서 관리합니다" }
         require(stock >= 0) { "재고는 0 미만이 될 수 없습니다" }
         this.stock = stock
         this.inventorySnapshotAt = snapshotAt

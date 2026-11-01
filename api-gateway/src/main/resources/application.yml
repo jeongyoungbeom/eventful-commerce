@@ -70,6 +70,20 @@ spring:
             filters:
               - StripPrefix=1
 
+          - id: inventory-service
+            uri: http://localhost:8088
+            predicates:
+              - Path=/api/inventory/**
+            filters:
+              - StripPrefix=1
+
+          - id: docs-inventory-service
+            uri: http://localhost:8088
+            predicates:
+              - Path=/api-docs/inventory
+            filters:
+              - SetPath=/v3/api-docs
+
           - id: settlement-service
             uri: http://localhost:8087
             predicates:
@@ -124,6 +138,8 @@ springdoc:
     urls:
       - name: User Service
         url: /api-docs/user
+      - name: Inventory Service
+        url: /api-docs/inventory
       - name: Product Service
         url: /api-docs/product
       - name: Order Service

@@ -13,8 +13,12 @@ data class OrderCanceledSellerPayload(
     val sellerOrderId: UUID,
     val sellerId: UUID,
     val refundAmount: Long,
-    val items: List<OrderCanceledItemPayload> = emptyList()
-)
+    val items: List<OrderCanceledItemPayload> = emptyList(),
+    val salesType: SalesType = SalesType.MARKETPLACE,
+    val orderItemId: UUID? = null
+) {
+    init { salesType.validateSeller(sellerId) }
+}
 
 data class OrderCanceledItemPayload(
     val orderItemId: UUID,

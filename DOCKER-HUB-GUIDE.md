@@ -6,15 +6,9 @@ Docker Hub를 사용한 이미지 빌드, 푸시, 배포 전체 워크플로우�
 
 **Username:** `jybeomss1`
 
-**이미지:**
-- `jybeomss1/order-service:latest`
-- `jybeomss1/payment-service:latest`
-- `jybeomss1/shipping-service:latest`
+**이미지:** `jybeomss1/<서비스명>:latest` 형식의 9개 이미지입니다.
 
-**Docker Hub 저장소:**
-- https://hub.docker.com/r/jybeomss1/order-service
-- https://hub.docker.com/r/jybeomss1/payment-service
-- https://hub.docker.com/r/jybeomss1/shipping-service
+`api-gateway`, `order-service`, `payment-service`, `shipping-service`, `notification-service`, `user-service`, `product-service`, `settlement-service`, `inventory-service`를 전체/단일 스크립트에서 모두 지원합니다.
 
 ---
 
@@ -38,9 +32,8 @@ chmod +x build-and-push.sh
 chmod +x pull-and-start.sh
 ./pull-and-start.sh
 
-# 또는
-chmod +x start-all.sh
-./start-all.sh
+# 단일 서비스 업데이트 (전체 최초 기동 후)
+./pull-and-restart-one.sh inventory-service
 ```
 
 ---
@@ -59,7 +52,7 @@ vim order-service/src/main/kotlin/...
 
 이 스크립트는 자동으로:
 1. ✅ Docker Hub 로그인 확인
-2. ✅ 3개 서비스 빌드
+2. ✅ 재고 서비스를 포함한 9개 서비스 빌드
 3. ✅ Docker Hub에 푸시
 
 **소요 시간:** 약 5-10분 (첫 빌드)
@@ -95,7 +88,7 @@ vim order-service/src/main/kotlin/...
 
 # 3. 로컬에서 테스트
 docker-compose down
-./start-all.sh
+./pull-and-start.sh
 
 # 4. 팀원들에게 알림
 # "order-service 업데이트했습니다! pull-and-start.sh 실행하세요"
@@ -331,5 +324,27 @@ jobs:
 
 1. 로그 확인: `docker-compose logs -f [service-name]`
 2. 컨테이너 재시작: `docker-compose restart [service-name]`
-3. 완전 재시작: `docker-compose down && ./start-all.sh`
-4. 데이터 초기화: `docker-compose down -v && ./start-all.sh`
+3. 완전 재시작: `docker-compose down && ./pull-and-start.sh`
+4. 데이터 초기화: `docker-compose down -v && ./pull-and-start.sh`
+
+## 재고 포함 한 번에 실행
+
+최초 1회 `docker login`을 하고 `.env`의 `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`를 설정합니다. 기존 파일의 값을 유지하며, 누락/빈 `JWT_SECRET`과 `INVENTORY_SERVICE_TOKEN`만 자동 생성합니다. 두 서비스는 동일한 내부 토큰을 사용합니다. 토큰은 출력하지 않으며 `.env`는 Docker 빌드 컨텍스트에서 제외합니다.
+
+```bash
+# 개발 PC에서 현재 소스 전체를 빌드·푸시한 뒤 전체 실행
+bash ./build-and-push.sh && bash ./pull-and-start.sh
+
+# 서버에서는 최신 이미지 전체를 받아 실행
+bash ./pull-and-start.sh
+
+# 재고 서비스만 빌드·푸시 / 최초 전체 기동 이후 개별 교체
+bash ./build-and-push-one.sh inventory-service
+bash ./pull-and-restart-one.sh inventory-service
+```
+
+전체 실행은 9개 이미지를 받은 뒤 PostgreSQL/Kafka/Redis를 시작하고 PostgreSQL TCP 준비를 확인합니다. 기존 볼륨에 `inventory_service` DB가 없으면 이것만 생성하고 Redis 클러스터를 준비한 다음 전체 앱을 기동합니다. 주문·재고 이미지도 Docker Hub의 같은 태그를 사용하며 pull 경로에서 로컬 빌드를 실행하지 않습니다. 앱 기동 완료는 `docker compose ps`와 서비스 로그에서 확인합니다.
+
+기존 DB·볼륨을 삭제하거나 Flyway checksum을 자동 복구하지 않습니다. 기존 재고 DB에 과거 초기 스키마가 남아 있거나 다른 서비스에 미반영 SQL이 있다면 [스키마 정책](docs/schema-migration-policy.md)에 따라 별도 적용해야 합니다. 이 스크립트는 스키마 이전 도구가 아닙니다.
+
+관리자 화면: `http://localhost/api/inventory/admin/index.html` (ADMIN access JWT 필요).

@@ -54,6 +54,15 @@ class ShippingServiceTest {
         )
     }
 
+    @Test fun `직매입 확정은 기존 자동 배송을 만들지 않는다`() {
+        every { processedEventRepository.insertIfAbsent(any()) } returns 1
+        val direct = OrderConfirmedSellerPayload(UUID.randomUUID(), com.eventfulcommerce.common.SalesType.OFFICIAL_SELLER_ID,
+            1_000, com.eventfulcommerce.common.SalesType.DIRECT_PURCHASE)
+        shippingService.handleOrderConfirmed(UUID.randomUUID(), objectMapper.writeValueAsString(OrderConfirmedPayload(
+            UUID.randomUUID(), UUID.randomUUID(), 1_000, listOf(direct), java.time.Instant.now())))
+        verify(exactly = 0) { shippingRepository.insertIfAbsent(any(), any(), any(), any(), any(), any()) }
+    }
+
     @Test
     fun `ORDER_CONFIRMED는 준비 배송을 생성하고 출고 호출만 시작 이벤트를 한 번 기록한다`() {
         val payload = orderConfirmedPayload()

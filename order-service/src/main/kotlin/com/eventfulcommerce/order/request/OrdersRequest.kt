@@ -1,5 +1,6 @@
 package com.eventfulcommerce.order.request
 
+import com.fasterxml.jackson.annotation.JsonAnySetter
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Size
@@ -10,4 +11,8 @@ data class OrdersRequest(
     @field:Size(min = 1, message = "주문 상품은 1개 이상이어야 합니다")
     @field:Valid
     val items: List<OrderItemRequest>
-)
+) {
+    @JsonAnySetter fun rejectUnknown(name: String, value: Any?) {
+        throw IllegalArgumentException("허용되지 않은 주문 필드: $name")
+    }
+}

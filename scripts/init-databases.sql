@@ -51,3 +51,11 @@ GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
 \c settlement_service
 GRANT ALL PRIVILEGES ON DATABASE settlement_service TO postgres;
 GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
+
+-- 신규 볼륨 초기화 전용. 기존 DB/볼륨을 삭제하거나 초기화하지 않는다.
+SELECT 'CREATE DATABASE inventory_service'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'inventory_service')\gexec
+
+\c inventory_service
+GRANT ALL PRIVILEGES ON DATABASE inventory_service TO postgres;
+GRANT ALL PRIVILEGES ON SCHEMA public TO postgres;
